@@ -1,0 +1,8 @@
+# PPO reference = rsl_rl OnPolicyRunner with Isaac Lab's shipped agent config for each task
+# (rsl_rl_cfg_entry_point). Untuned reference first; the tuning budget is spent later under the
+# same protocol as the model-based methods (docs/protocol.md, "Tuning budget").
+name: ppo
+impl: reference
+agent_entry_point: rsl_rl_cfg_entry_point
+max_iterations: null        # null -> Isaac Lab default for the task
+agent_overrides: {}         # dotted fields of the RslRlOnPolicyRunnerCfg, e.g. {algorithm.learning_rate: 3.0e-4}

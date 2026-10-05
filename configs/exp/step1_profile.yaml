@@ -1,0 +1,11 @@
+# Nsight Systems time breakdown over a steady-state window (startup excluded).
+# PPO windows are in learning iterations; PETS windows are in env iterations (one plan+step for all envs).
+name: step1_profile
+timeout_min: 60
+jobs:
+  - kind: profile
+    matrix: {algo: [ppo], task: [cartpole, ant, anymal], seed: [0]}
+    overrides: {profile.start: 20, profile.length: 30}
+  - kind: profile
+    matrix: {algo: [pets_naive], task: [cartpole], seed: [0]}
+    overrides: {profile.start: 150, profile.length: 200}

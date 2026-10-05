@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gpubench"
+version = "0.1.0"
+description = "When does a learned model beat massively parallel simulation? GPU-native MBRL vs PPO benchmark on Isaac Lab."
+requires-python = ">=3.10"
+dependencies = [
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+# Local machine (Windows/macOS/Linux): only what is needed to drive Vast.ai.
+launcher = [
+    "vastai>=1.8.2",
+    "rich>=13.0",
+]
+# GPU instance: Isaac Lab / Isaac Sim / torch are installed by infra/bootstrap.sh from
+# requirements/remote.lock.txt (they need the NVIDIA extra index), not from here.
+remote = [
+    "numpy",
+    "pandas",
+    "pytest",
+]
+dev = ["pytest", "ruff"]
+
+[project.scripts]
+gpubench-vast = "gpubench.launcher.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120

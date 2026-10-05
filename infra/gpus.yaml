@@ -1,0 +1,40 @@
+# One entry per GPU class. Everything that differs between GPUs lives here, so moving the whole
+# study to a new GPU is `gpubench-vast exp <alias> <exp.yaml>`.
+#
+# `query` uses Vast search syntax (same as `vastai search offers`).
+#   cuda_vers>=12.8   host driver must support the cu128 wheels
+#   reliability       avoid flaky hosts mid-sweep
+#   inet_down         the Isaac Sim wheels are ~15 GB; slow links waste paid minutes
+#   verified=true     datacenter/verified hosts only
+#
+# Offers are sorted by $/hr and the cheapest match is taken unless --offer is given.
+
+defaults:
+  # Ubuntu 22.04 (GLIBC 2.35), Python 3.11, torch 2.7.0+cu128 preinstalled.
+  # After the first successful launch, pin the digest reported by `gpubench-vast show <id>`
+  # by writing it as  image: pytorch/pytorch@sha256:<digest>  so all GPUs use bit-identical bases.
+  image: pytorch/pytorch:2.7.0-cuda12.8-cudnn9-runtime
+  disk_gb: 150
+  base_query: "num_gpus=1 cuda_vers>=12.8 reliability>0.98 inet_down>=500 disk_space>=150 verified=true rentable=true"
+  env:
+    OMNI_KIT_ACCEPT_EULA: "Yes"
+    ACCEPT_EULA: "Y"
+    PRIVACY_CONSENT: "Y"
+    # graphics+compute driver libs must be mounted for headless Kit (Vulkan) to start
+    NVIDIA_DRIVER_CAPABILITIES: "all"
+    PYTHONUNBUFFERED: "1"
+
+gpus:
+  rtx4090:
+    query: "gpu_name=RTX_4090"
+  a100:
+    # No RT cores: headless PhysX may or may not boot -> run `gpubench-vast smoke a100` first.
+    query: "gpu_name in [A100_SXM4,A100_PCIE]"
+  h100:
+    query: "gpu_name in [H100_SXM,H100_PCIE,H100_NVL]"
+  l40s:
+    query: "gpu_name=L40S"
+  l4:
+    query: "gpu_name=L4"
+  rtx5090:
+    query: "gpu_name=RTX_5090"

@@ -1,0 +1,8 @@
+# PPO reference baselines: 3 tasks x 5 seeds at Isaac Lab defaults (4096 envs, shipped agent cfg).
+name: step1_ppo
+timeout_min: 120                     # per job
+jobs:
+  - matrix:
+      algo: [ppo]
+      task: [cartpole, ant, anymal]
+      seed: [0, 1, 2, 3, 4]

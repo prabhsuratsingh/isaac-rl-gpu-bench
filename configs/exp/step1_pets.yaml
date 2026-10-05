@@ -1,0 +1,21 @@
+# Naive PETS: cost-port checks, a sync-debug run proving no host syncs in our code, then seeds.
+name: step1_pets
+timeout_min: 180
+jobs:
+  - name: check_costs_cartpole
+    cmd: python scripts/check_costs.py --task cartpole
+  - name: check_costs_ant
+    cmd: python scripts/check_costs.py --task ant
+    allow_fail: true                 # approximate port: informative, not a gate
+  - name: pets_cartpole_syncdebug
+    matrix: {algo: [pets_naive], task: [cartpole], seed: [0]}
+    overrides: {algo.sync_debug: error, algo.total_env_steps: 6000, run.exp: step1_pets_syncdebug}
+  - matrix:
+      algo: [pets_naive]
+      task: [cartpole]
+      seed: [0, 1, 2, 3, 4]
+  - matrix:                          # attempted, not a step-1 gate
+      algo: [pets_naive]
+      task: [ant]
+      seed: [0]
+    allow_fail: true

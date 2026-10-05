@@ -1,0 +1,7 @@
+# Robotics locomotion: velocity-command tracking on flat ground (Direct workflow).
+# Step 1: PPO only. The PETS cost needs the command-tracking + contact terms (envs/costs.py:make_anymal).
+gym_id: Isaac-Velocity-Flat-Anymal-C-Direct-v0
+cost: anymal
+num_envs: 4096
+sim_substep_mult: 1
+env_cfg_overrides: {}

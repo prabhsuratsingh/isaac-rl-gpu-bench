@@ -1,0 +1,12 @@
+# Easy sanity-check task. Episode: 5 s at 60 Hz control -> 300 steps; max return ~= 300.
+gym_id: Isaac-Cartpole-Direct-v0
+cost: cartpole               # envs/costs.py (exact port of the env reward)
+num_envs: 4096               # PPO default (Isaac Lab reference)
+sim_substep_mult: 1          # crossover knob: physics substeps per control step multiplier
+env_cfg_overrides: {}        # dotted DirectRLEnvCfg fields, e.g. {episode_length_s: 10.0}
+
+algo_overrides:
+  pets:
+    num_envs: 32
+    total_env_steps: 20000
+    mppi: {horizon: 25, samples: 400, iterations: 2}

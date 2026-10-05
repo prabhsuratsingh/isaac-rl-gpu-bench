@@ -1,0 +1,29 @@
+# PETS, naive plain-PyTorch implementation (Axis-D baseline). All on GPU, no host syncs in our code.
+name: pets
+impl: naive
+num_envs: 32                 # real Isaac Lab envs, all planned for in one batched MPPI call
+total_env_steps: 30000       # summed over envs (same unit as PPO's env_steps)
+seed_steps: 2000             # uniform-random transitions before the first model fit
+train_every: 1000            # retrain the ensemble every N collected transitions
+log_every: 1000
+buffer_capacity: 1000000
+clip_actions: 1.0
+sync_debug: "off"            # off | warn | error  -> torch.cuda.set_sync_debug_mode around plan + buffer
+
+model:
+  ensemble_size: 5
+  hidden: 200
+  layers: 4
+  lr: 1.0e-3
+  weight_decay: 1.0e-5
+  batch_size: 256            # per member
+  first_train_steps: 2000
+  train_steps: 300
+
+mppi:
+  horizon: 25
+  samples: 400               # K action sequences per env
+  particles: 1               # P particles per sequence (K*P must be divisible by ensemble_size)
+  iterations: 2
+  temperature: 0.5           # in units of the per-env return std (scale-free)
+  noise_std: 0.5

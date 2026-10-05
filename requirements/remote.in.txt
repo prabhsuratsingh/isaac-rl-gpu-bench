@@ -1,0 +1,10 @@
+# Loose top-level pins for the GPU instance. Used only until requirements/remote.lock.txt exists.
+# After the first good instance:  gpubench-vast freeze <id>   -> writes remote.lock.txt, commit it.
+# From then on every GPU (4090 / A100 / H100 / L40S) installs exactly the lock.
+#
+# Base image already ships torch 2.7.0+cu128 and Python 3.11 (see infra/gpus.yaml: image).
+--extra-index-url https://pypi.nvidia.com
+isaaclab[isaacsim,all]==2.3.2.post1
+rsl-rl-lib==3.1.2
+pandas
+pytest

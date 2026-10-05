@@ -1,0 +1,17 @@
+# Locomotion. Episode: 15 s at 60 Hz control -> 900 steps. Obs 36, act 8. Cheap per-step sim cost,
+# which makes it the main task for the sim-cost crossover sweep (sim_substep_mult).
+gym_id: Isaac-Ant-Direct-v0
+cost: ant                    # envs/costs.py (approximate: progress term from body velocity)
+num_envs: 4096
+sim_substep_mult: 1
+env_cfg_overrides: {}
+
+algo_overrides:
+  pets:
+    num_envs: 32
+    total_env_steps: 200000
+    train_every: 5000
+    log_every: 5000
+    seed_steps: 10000
+    model: {hidden: 256, train_steps: 500, first_train_steps: 3000}
+    mppi: {horizon: 20, samples: 500, iterations: 2, noise_std: 0.4}

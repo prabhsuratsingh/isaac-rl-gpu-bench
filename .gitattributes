@@ -1,0 +1,4 @@
+# Everything runs on Linux instances: force LF so bash scripts don't break when committed from Windows.
+* text=auto eol=lf
+*.nsys-rep binary
+*.png binary

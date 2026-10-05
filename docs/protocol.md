@@ -1,0 +1,124 @@
+# Benchmark protocol
+
+**Status:** v0.1 (step 1). The sections marked **FROZEN** may not change after the step-1 PPO runs. Any change
+after that point re-runs every affected method.
+
+The question is when a learned model beats massively parallel simulation. This document fixes what
+"beats" means, how it is measured and how every method is given a fair chance.
+
+---
+
+## 1. Tasks (FROZEN)
+
+| alias      | gym id                                   | obs | act | control dt | episode   | model-based cost        |
+|------------|------------------------------------------|-----|-----|------------|-----------|-------------------------|
+| `cartpole` | `Isaac-Cartpole-Direct-v0`               | 4   | 1   | 1/60 s     | 300 steps | exact port              |
+| `ant`      | `Isaac-Ant-Direct-v0`                    | 36  | 8   | 1/60 s     | 900 steps | approx. port (progress) |
+| `anymal`   | `Isaac-Velocity-Flat-Anymal-C-Direct-v0` | 48  | 12  | 1/50 s     | 1000 steps| not ported (PPO only in step 1) |
+
+- **Software stack:** Isaac Lab 2.3.2.post1, Isaac Sim 5.1 (PhysX GPU), torch 2.7.0+cu128, rsl-rl-lib 3.1.2 and Python 3.11. The exact package set is `requirements/remote.lock.txt` on top of the pinned base image in `infra/gpus.yaml`.
+- **Env config:** the Isaac Lab defaults for every task, plus only the overrides listed in `configs/task/*.yaml`.
+- **Cost functions:** model-based methods plan with the torch reward/termination functions in `src/gpubench/envs/costs.py`. They are validated against the simulator's own rewards by `scripts/check_costs.py`, and the results are stored in `results/<gpu>/checks/`. Cartpole must match within 1e-4. For Ant we report the correlation and the mean absolute error.
+- **Sim-cost knob (crossover):** `task.sim_substep_mult = k` divides `sim.dt` by k and multiplies `decimation` by k. Control rate, episode length and the obs/action spaces are unchanged, and each env step costs about k× the physics.
+
+## 2. Methods and implementations
+
+| method | implementation | notes |
+|---|---|---|
+| PPO | `reference`: rsl_rl `OnPolicyRunner` with Isaac Lab's shipped agent config | 4096 envs by default; the 512→8192 sweep comes later |
+| PETS | `naive`: plain PyTorch, a Python loop over ensemble members and horizon, fp32 | Axis-D baseline |
+| PETS | `fused` (later): batched ensemble, fused sampling/cost, CUDA graphs, bf16 | one optimisation at a time |
+| MBPO, Dreamer | later steps | |
+
+**GPU-native requirement:** in our own code, planning, model inference, model training and replay run entirely on the GPU. No `.cpu()`, `.item()` or boolean-mask indexing happens inside the act loop. This is enforced by a `sync_debug=error` run (`torch.cuda.set_sync_debug_mode`) in `configs/exp/step1_pets.yaml`. Syncs inside the simulator's `step()` (for example Isaac Lab's reset bookkeeping) are attributed to the `sim` phase, and are the same for every method.
+
+**Auto-reset masking:** Isaac Lab resets finished envs inside `step()`, so the returned `next_obs` of a done env is the post-reset observation. Model-based learners keep such transitions in the buffer with `valid=0`, and they are excluded from model training by loss weighting (no sync). PPO uses rsl_rl's standard handling (time-out bootstrapping as configured by Isaac Lab).
+
+## 3. Seeds and statistics (FROZEN)
+
+- **Evaluation seeds:** 0, 1, 2, 3, 4 for every (method, task, GPU) cell. The seed sets torch/numpy/python RNGs, `env_cfg.seed` and the agent seed.
+- **Tuning seeds:** 100, 101, 102. They are never used for reported numbers.
+- **Aggregation:** mean ± 95% CI from a percentile bootstrap over seeds (10,000 resamples). With n=5 we also show every seed as a thin line or dot, and never report a mean alone.
+- **Determinism:** runs use `deterministic=False` (the fast kernels), TF32 is on (the Isaac Lab default), and cuDNN benchmark is off. Across GPUs, "identical" means the same seeds, lock file and configs. Bitwise-identical trajectories are not expected.
+
+## 4. Metrics
+
+| metric | definition |
+|---|---|
+| env step | one transition of one env (`num_envs` transitions per vectorised `step()`) |
+| `env_steps_per_s` | env transitions per wall-clock second over the log interval, with everything included (sim, planning, learning) |
+| `model_rollouts_per_s` | model transitions (particle × horizon step) evaluated per second of planner time |
+| `planner_steps_per_s` | real-env actions produced per second of planner time (`num_envs` × plan calls / plan time) |
+| `reward_mean` | mean undiscounted return of training episodes that finished recently. PPO uses rsl_rl's last-100-episodes buffer; PETS uses the episodes completed during the log interval. Both come from the behaviour policy that actually collects the data. |
+| **wall-clock to threshold** (headline) | `wall_s` at the first log row where `reward_mean ≥ τ_task` and the next row also satisfies it. `wall_s` starts after Isaac Sim boot, so boot is the same for all methods and is reported separately in `smoke.json`. It includes env creation. |
+| samples to threshold | `env_steps` at the same row |
+| GPU-hours per solved task | wall-clock to threshold / 3600 (1 GPU). Cost in $ = GPU-hours × the instance's $/hr from `run_meta.json`. |
+| time breakdown | per-phase GPU ms (CUDA events) and host ms (perf_counter) in every log row, plus Nsight NVTX breakdowns (§7) |
+| memory | `torch.cuda.max_memory_allocated/reserved` per log interval (the simulator's own allocations are not included) |
+
+**Reward thresholds τ (FROZEN once filled in):** τ_task = 0.9 × the mean over the 5 evaluation seeds of PPO's final `reward_mean` (mean of the last 5 log rows), using the untuned reference config on the RTX 4090. Runs that never reach τ are reported as censored (> budget) and are not dropped.
+
+| task | PPO final reward (mean ± CI) | τ |
+|---|---|---|
+| cartpole | _fill from step1_ppo_ | _TBD_ |
+| ant | _fill from step1_ppo_ | _TBD_ |
+| anymal | _fill from step1_ppo_ | _TBD_ |
+
+## 5. Tuning budget (the fairness rule)
+
+Every method gets the same hyperparameter search budget per task:
+
+- **Search:** random search (Optuna `RandomSampler`) with **20 trials** per (method, task) on the tuning seeds, with a 1-hour wall-clock cap per trial on the RTX 4090.
+- **Objective:** the median over the tuning seeds of wall-clock to threshold. Censored trials score the cap.
+- **Search spaces:** declared in `configs/tuning/<method>.yaml` before any tuning run, with a similar number of dimensions for every method (about 6). PPO's space includes `num_envs`, learning rate, `num_steps_per_env`, epochs, minibatches and entropy coefficient.
+- **Accounting:** the GPU-hours spent tuning are logged per method and reported alongside the results.
+- **Order of reporting:** the untuned reference numbers (Isaac Lab defaults for PPO, the literature defaults in `configs/algo/*.yaml` for model-based methods) are reported *in addition to* the tuned ones.
+
+## 6. Logging format
+
+Each run writes `results/<exp>/<run_id>/`, and the launcher pulls it to `results/<gpu>/<exp>/<run_id>/`:
+
+- `run_meta.json`
+  - schema version
+  - run id, algo, impl, task, seed, exp, start time
+  - `sys`: GPU model, driver, max CUDA supported by the driver, SM count, clocks, torch CUDA/cuDNN, package versions, git SHA
+  - `vast`: GPU alias, offer id, $/hr, image
+- `config.json`: the fully resolved config.
+- `agent_cfg.json`: the resolved rsl_rl agent config (PPO only).
+- `metrics.jsonl`: one row per log interval.
+  ```json
+  {"run_id", "algo", "impl", "task", "seed", "wall_s", "iteration", "env_steps",
+   "env_steps_per_s", "model_rollouts_per_s", "planner_steps_per_s",
+   "reward_mean", "ep_len_mean", "episodes",
+   "gpu_ms": {"sim":…, "plan":…, "model_train":…, "policy_act":…, "policy_update":…, "buffer":…},
+   "host_ms": {…same keys…}, "calls": {…},
+   "mem_alloc_max_mb", "mem_reserved_max_mb",
+   "model_loss", "model_train_mse", "model_holdout_mse",      // PETS
+   "collection_s", "learn_s", "loss_*"}                        // PPO (rsl_rl's own timers/losses)
+  ```
+- `summary.json`: status (`ok` or `failed` with a traceback), total wall time, GPU-hours, cost, env creation time, physics and control dt.
+
+`gpu_ms` is measured between CUDA events on the current stream. It equals device time for GPU-bound phases, but for host-bound phases such as a naive Python loop, `host_ms` is the honest number. Both are kept, and the figures state which one they use.
+
+## 7. Nsight Systems recipe
+
+```bash
+bash scripts/profile.sh <name> algo=<a> task=<t> seed=0 profile.start=<i0> profile.length=<n>
+```
+
+- The run records `--trace=cuda,nvtx,osrt --sample=none --cpuctxsw=none --capture-range=cudaProfilerApi`. The window is opened and closed from Python after warmup, so boot and JIT are excluded.
+- Windows: PPO uses iterations 20–50. PETS uses env iterations 150–350, after the first model fit.
+- Phases are NVTX ranges with the same names as the `gpu_ms` keys. `scripts/nsys_breakdown.py` turns `nvtx_sum` (host), `nvtx_gpu_proj_sum` (GPU) and `cuda_gpu_kern_sum` into `<name>.breakdown.json`, which is the input to the stacked-bar figure.
+- Profiles are taken from separate runs and are never mixed into the timing results, because profiler overhead would contaminate them.
+
+## 8. Hardware protocol (Axis C)
+
+- Hardware: one GPU per instance, with the GPU class defined by `infra/gpus.yaml`. Hosts must be verified, have reliability > 0.98 and a driver supporting CUDA ≥ 12.8.
+- Software: the same lock file, base image and commit on every GPU. The launcher refuses dirty or unpushed trees.
+- Each instance runs `scripts/smoke_test.py` before any job, and its report (`smoke.json`: boot time and random-action env-steps/s per task) is archived with the results.
+- Only one job runs on a GPU at a time.
+- Known risk: A100 and H100 have no RT cores, and Isaac Sim officially targets RTX GPUs. Headless PhysX support is checked with `gpubench-vast smoke a100` before we plan runs there.
+
+## 9. Change log
+
+- v0.1: initial protocol (step 1).
