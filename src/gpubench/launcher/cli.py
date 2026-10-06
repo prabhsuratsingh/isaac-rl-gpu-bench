@@ -50,6 +50,30 @@ def _gpu_alias(inst_id: int, inst: dict) -> str:
 
 
 # ----------------------------------------------------------------------------------------------------
+def _check_ssh_key() -> str:
+    """The key ssh will actually offer must be one registered on the Vast account."""
+    registered = {k.get("public_key", "").split()[1] for k in (I.vast_client().show_ssh_keys() or [])
+                  if len(k.get("public_key", "").split()) > 1}
+    own = os.environ.get("GPUBENCH_SSH_KEY")
+    if own:
+        pub = Path(own + ".pub")
+        if not Path(own).exists() or not pub.exists():
+            raise RuntimeError(f"GPUBENCH_SSH_KEY={own}: private key or {pub.name} not found")
+        if pub.read_text().split()[1] not in registered:
+            raise RuntimeError(f"{pub} is not registered on Vast (cloud.vast.ai/manage-keys)")
+        return f"{Path(own).name} (GPUBENCH_SSH_KEY) is registered"
+    # Without GPUBENCH_SSH_KEY, OpenSSH only offers its default key names.
+    defaults = ["id_rsa", "id_ecdsa", "id_ed25519"]
+    home = Path.home() / ".ssh"
+    for name in defaults:
+        pub = home / f"{name}.pub"
+        if pub.exists() and pub.read_text().split()[1] in registered:
+            return f"~/.ssh/{name} is registered"
+    matches = [p.stem for p in home.glob("*.pub") if len(p.read_text().split()) > 1 and p.read_text().split()[1] in registered]
+    hint = f"; set GPUBENCH_SSH_KEY to {home / matches[0]} in .env" if matches else "; add a key at cloud.vast.ai/manage-keys"
+    raise RuntimeError("no default key (" + ", ".join(defaults) + ") is registered on Vast" + hint)
+
+
 def cmd_doctor(a):
     ok = True
 
@@ -71,10 +95,7 @@ def cmd_doctor(a):
     check("vast api key", lambda: f"{len(I.vast_client().show_instances())} running instance(s)")
     check("vast ssh keys", lambda: (lambda k: require(k, "none registered: add your public key at cloud.vast.ai/manage-keys",
                                                         f"{len(k)} registered"))(I.vast_client().show_ssh_keys()))
-    home = Path.home() / ".ssh"
-    keys = [p.name for p in home.glob("id_*") if not p.name.endswith(".pub")] if home.exists() else []
-    own_key = os.environ.get("GPUBENCH_SSH_KEY")
-    check("local ssh key", lambda: require(keys or own_key, "no ~/.ssh/id_* key; run ssh-keygen -t ed25519", own_key or ", ".join(keys)))
+    check("ssh key matches Vast", _check_ssh_key)
     check("ssh client", lambda: subprocess.run(["ssh", "-V"], capture_output=True, text=True).stderr.strip())
     check("github token", lambda: require(os.environ.get("GPUBENCH_GH_TOKEN"),
                                           "set GPUBENCH_GH_TOKEN in .env (fine-grained PAT, Contents: read-only)", "GPUBENCH_GH_TOKEN set"))
@@ -99,12 +120,43 @@ def _up(gpu: str, offer: int | None, allow_dirty: bool, wait: bool = True) -> tu
     git = I.git_state(allow_dirty=allow_dirty)
     res = I.create(gpu, offer, git)
     inst_id = res["id"]
-    print(f"created instance {inst_id} on offer {res['offer']['id']} (${res['offer'].get('dph_total') or '?'}/hr) @ {git['sha'][:10]}")
+    price = res["offer"].get("dph_total")
+    print(f"created instance {inst_id} on offer {res['offer']['id']} ({f'${price:.3f}' if price else 'price on start'}/hr) @ {git['sha'][:10]}")
     if not wait:
         return inst_id, {}, None
     inst = I.wait_running(inst_id)
     rem = I.wait_ready(inst)
+    _stamp_price(rem, inst)
     return inst_id, inst, rem
+
+
+def _stamp_price(rem: Remote, inst: dict):
+    """Write the instance's real $/hr into the job environment (cost_usd in every run summary)."""
+    dph = inst.get("dph_total")
+    if dph:
+        rem.run(f"sed -i '/^export GPUBENCH_DPH=/d' /etc/gpubench.env && echo 'export GPUBENCH_DPH=\"{dph:.4f}\"' >> /etc/gpubench.env",
+                cwd=None)
+
+
+def cmd_rebootstrap(a):
+    """Re-run infra/bootstrap.sh on a live instance (after `sync`), detached; then wait for it."""
+    inst_id, inst, rem = _remote(a.id)
+    rem.run("rm -f /workspace/.ready /workspace/.bootstrap_failed", cwd=None)
+    rem.detach("bootstrap", "bash infra/bootstrap.sh", "/workspace/bootstrap.log")
+    print("bootstrap restarted; waiting (Ctrl-C is safe, it keeps running on the instance)")
+    I.wait_ready(inst)
+    _stamp_price(rem, inst)
+    print(f"ready: gpubench-vast ssh {inst_id}")
+    return 0
+
+
+def cmd_wait(a):
+    """Wait for an instance's bootstrap to finish (e.g. after Ctrl-C on `up`)."""
+    inst_id, inst, rem = _remote(a.id)
+    I.wait_ready(inst)
+    _stamp_price(rem, inst)
+    print(f"ready: gpubench-vast ssh {inst_id}")
+    return 0
 
 
 def cmd_up(a):
@@ -142,8 +194,9 @@ def cmd_ssh(a):
 
 def cmd_sync(a):
     """Checkout a new commit on a live instance without re-bootstrapping."""
-    inst_id, _, rem = _remote(a.id)
+    inst_id, inst, rem = _remote(a.id)
     git = I.git_state(allow_dirty=a.allow_dirty)
+    _stamp_price(rem, inst)
     I.load_dotenv()
     tok = os.environ["GPUBENCH_GH_TOKEN"]
     url = f"https://x-access-token:{tok}@github.com/{git['repo']}.git"
@@ -160,9 +213,9 @@ def _start_exp(rem: Remote, exp_file: str, sha: str | None) -> str:
     spec["git_sha"] = sha
     remote_file = f"/workspace/jobs/{spec['exp']}.json"
     rem.put_text(remote_file, json.dumps(spec, indent=2))
-    rem.run(f"mkdir -p /workspace/logs && setsid nohup python -m gpubench.launcher.jobrunner {remote_file} "
-            f"> /workspace/logs/{spec['exp']}.runner.log 2>&1 < /dev/null &")
-    print(f"started {spec['exp']}: {len(spec['jobs'])} job(s)")
+    rem.detach(f"exp_{spec['exp']}", f"python -m gpubench.launcher.jobrunner {remote_file}",
+               f"/workspace/logs/{spec['exp']}.runner.log")
+    print(f"started {spec['exp']}: {len(spec['jobs'])} job(s)  (tmux session exp_{spec['exp']} on the instance)")
     return spec["exp"]
 
 
@@ -368,6 +421,8 @@ def main(argv=None):
         else:
             sp.add_argument("--keep", action="store_true")
     add("ls", cmd_ls, "list your Vast instances (and their running cost)")
+    add("rebootstrap", cmd_rebootstrap, "re-run infra/bootstrap.sh on the instance (after sync)").add_argument("id", nargs="?")
+    add("wait", cmd_wait, "wait until the instance's bootstrap is done").add_argument("id", nargs="?")
     for name, fn, h in [("show", cmd_show, "instance details"), ("pull", cmd_pull, "download results/ + logs"),
                         ("freeze", cmd_freeze, "write requirements/remote.lock.txt from instance")]:
         add(name, fn, h).add_argument("id", nargs="?")

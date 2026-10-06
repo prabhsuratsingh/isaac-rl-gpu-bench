@@ -69,6 +69,17 @@ class Remote:
         except subprocess.TimeoutExpired:
             return False
 
+    def detach(self, name: str, cmd: str, log: str, cwd: str = REMOTE_REPO):
+        """Start `cmd` in a detached tmux session that survives the ssh connection closing.
+
+        (`setsid nohup ... &` over a non-tty ssh session races with session teardown and can be killed
+        before it even opens its log file; the tmux server is a proper daemon.)
+        """
+        inner = f"source /etc/gpubench.env 2>/dev/null; cd {cwd}; {cmd} > {shlex.quote(log)} 2>&1"
+        self.run(f"mkdir -p {shlex.quote(os.path.dirname(log))} && tmux kill-session -t {name} 2>/dev/null; "
+                 f"tmux new-session -d -s {name} {shlex.quote('bash -c ' + shlex.quote(inner))} && sleep 2 && "
+                 f"(tmux has-session -t {name} 2>/dev/null || test -s {shlex.quote(log)})", cwd=None)
+
     def put_text(self, remote_path: str, content: str):
         d = os.path.dirname(remote_path)
         self.run(f"mkdir -p {shlex.quote(d)} && cat > {shlex.quote(remote_path)}", input=content, cwd=None)

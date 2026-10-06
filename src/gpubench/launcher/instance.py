@@ -217,10 +217,14 @@ def wait_ready(inst: dict, timeout_s: int = 5400, poll_s: int = 30) -> Remote:
     last_line = ""
     while time.time() - t0 < timeout_s:
         try:
-            out = rem.text("if [ -f /workspace/.ready ]; then echo READY; elif [ -f /workspace/.bootstrap_failed ]; then "
-                           "echo FAILED; cat /workspace/.bootstrap_failed; fi; tail -n 1 /workspace/bootstrap.log 2>/dev/null",
-                           check=False, timeout=60, cwd=None).strip()
-        except Exception as e:  # sshd not up yet
+            p = rem.run("if [ -f /workspace/.ready ]; then echo READY; elif [ -f /workspace/.bootstrap_failed ]; then "
+                        "echo FAILED; cat /workspace/.bootstrap_failed; fi; tail -n 1 /workspace/bootstrap.log 2>/dev/null",
+                        check=False, timeout=60, cwd=None)
+            out = p.stdout.decode(errors="replace").strip()
+            if p.returncode == 255:  # ssh itself failed (sshd not up yet, or wrong key)
+                err = p.stderr.decode(errors="replace").strip().splitlines()
+                out = f"(ssh failed: {err[-1] if err else 'no output'} -- if this persists, check GPUBENCH_SSH_KEY / `gpubench-vast doctor`)"
+        except Exception as e:
             out = f"(ssh not ready: {type(e).__name__})"
         if out.startswith("READY"):
             print(f"  [{int(time.time() - t0):4d}s] bootstrap complete")

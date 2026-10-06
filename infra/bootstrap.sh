@@ -18,13 +18,18 @@ rm -f $WS/.ready $WS/.bootstrap_failed
 # Env vars passed to the container are visible to onstart but not to later ssh sessions.
 # Persist the ones we need so jobs launched over ssh see the same environment.
 step "persist environment"
-env | grep -E '^(GPUBENCH_|GIT_SHA|GH_REPO|OMNI_KIT_ACCEPT_EULA|ACCEPT_EULA|PRIVACY_CONSENT|NVIDIA_|CONTAINER_ID|VAST_)' \
-  | grep -v '^GH_TOKEN' | sed 's/^/export /; s/=\(.*\)$/="\1"/' > /etc/gpubench.env || true
+# Keep a previously stamped GPUBENCH_DPH (written by the launcher) across re-runs.
+OLD_DPH=$(grep '^export GPUBENCH_DPH=' /etc/gpubench.env 2>/dev/null || true)
+# NVIDIA_VISIBLE_DEVICES is deliberately not persisted: Vast sets it to "void" inside the container.
+env | grep -E '^(GPUBENCH_|GIT_SHA|GH_REPO|OMNI_KIT_ACCEPT_EULA|ACCEPT_EULA|PRIVACY_CONSENT|NVIDIA_DRIVER_CAPABILITIES|CONTAINER_ID|VAST_)' \
+  | sed 's/^/export /; s/=\(.*\)$/="\1"/' > /etc/gpubench.env || true
 echo 'export PYTHONUNBUFFERED=1' >> /etc/gpubench.env
+[ -n "$OLD_DPH" ] && ! grep -q '^export GPUBENCH_DPH=' /etc/gpubench.env && echo "$OLD_DPH" >> /etc/gpubench.env || true
 grep -q gpubench.env /root/.bashrc 2>/dev/null || echo '[ -f /etc/gpubench.env ] && . /etc/gpubench.env' >> /root/.bashrc
 
 step "apt packages (headless Kit runtime libs, tools)"
 export DEBIAN_FRONTEND=noninteractive
+rm -f /etc/apt/sources.list.d/nvidia-devtools.list  # stale unsigned repo from an older bootstrap version
 apt-get update -qq
 apt-get install -y -qq --no-install-recommends \
   git curl wget ca-certificates gnupg tmux htop pciutils \
@@ -32,24 +37,32 @@ apt-get install -y -qq --no-install-recommends \
   libxkbcommon0 libegl1 libgl1 libvulkan1 vulkan-tools >/dev/null
 
 # The NVIDIA container toolkit mounts the Vulkan driver when NVIDIA_DRIVER_CAPABILITIES includes
-# graphics, but some hosts ship no ICD manifest. Kit needs it even headless.
-if ! ls /usr/share/vulkan/icd.d/nvidia_icd.json /etc/vulkan/icd.d/nvidia_icd.json >/dev/null 2>&1; then
+# graphics, but some hosts ship no ICD manifest. Kit needs it even headless. Exactly one manifest must
+# exist: two make Vulkan enumerate the same GPU twice.
+FALLBACK_ICD=/usr/share/vulkan/icd.d/nvidia_icd.json
+if [ -f /etc/vulkan/icd.d/nvidia_icd.json ]; then
+  if [ -f $FALLBACK_ICD ] && grep -q '"api_version": "1.3" } }' $FALLBACK_ICD; then rm -f $FALLBACK_ICD; echo "removed duplicate fallback ICD"; fi
+elif [ ! -f $FALLBACK_ICD ]; then
   mkdir -p /usr/share/vulkan/icd.d
-  cat > /usr/share/vulkan/icd.d/nvidia_icd.json <<'EOF'
+  cat > $FALLBACK_ICD <<'EOF'
 { "file_format_version": "1.0.0", "ICD": { "library_path": "libGLX_nvidia.so.0", "api_version": "1.3" } }
 EOF
   echo "wrote fallback nvidia_icd.json"
 fi
+vulkaninfo --summary 2>/dev/null | grep -E 'deviceName' || echo "WARNING: vulkaninfo found no device"
 
 step "Nsight Systems CLI"
+# From the CUDA apt repo (signed by cuda-keyring). Not fatal: only profiling jobs need it.
 if ! command -v nsys >/dev/null 2>&1; then
-  (
+  # (explicit && chain: `set -e` is ignored inside a `( ... ) || ...` list)
+  {
     wget -q https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb -O /tmp/ck.deb \
       && dpkg -i /tmp/ck.deb >/dev/null \
-      && echo "deb [signed-by=/usr/share/keyrings/cuda-archive-keyring.gpg] https://developer.download.nvidia.com/devtools/repos/ubuntu2204/amd64/ /" \
-         > /etc/apt/sources.list.d/nvidia-devtools.list \
-      && apt-get update -qq && apt-get install -y -qq --no-install-recommends nsight-systems-cli >/dev/null
-  ) || echo "WARNING: nsys install failed; profiling jobs will fail but training is unaffected"
+      && apt-get update -qq \
+      && apt-get install -y -qq --no-install-recommends cuda-nsight-systems-12-8 >/dev/null \
+      && NSYS_BIN=$(find /opt/nvidia /usr/local/cuda* -type f -name nsys -path '*/bin/*' 2>/dev/null | sort -V | tail -1) \
+      && [ -n "$NSYS_BIN" ] && ln -sf "$NSYS_BIN" /usr/local/bin/nsys
+  } || echo "WARNING: nsys install failed; profiling jobs will fail but training is unaffected"
 fi
 command -v nsys >/dev/null && nsys --version || true
 
