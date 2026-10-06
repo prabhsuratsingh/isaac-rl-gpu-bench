@@ -77,11 +77,14 @@ class GpuVecEnv:
       observation. `valid` marks transitions whose next_obs is a true successor state (not done).
       Model-based learners train only on valid transitions (protocol: 'auto-reset masking').
     * Episode returns are accumulated on-device; `pop_episode_stats()` is the only sync point.
-    * `reward_mean` is over the last `window` finished episodes, the same definition rsl_rl uses for PPO
-      (its 100-episode rewbuffer), so both methods' curves and time-to-threshold are comparable.
+    * `reward_mean` is over the last min(100, num_envs) finished episodes. With PPO's 4096 envs, rsl_rl's
+      100-episode buffer holds only the most recent finishers, so it lags the policy by about one episode.
+      With 32 envs a 100-episode window would span ~3 generations of episodes (in step 1 it still held the
+      random-action episodes at the end of training), so the window is capped at num_envs. That gives the
+      same ~one-episode lag for both. See docs/protocol.md section 4.
     """
 
-    def __init__(self, env, clip_actions: float | None = 1.0, window: int = 100):
+    def __init__(self, env, clip_actions: float | None = 1.0, window: int | None = None):
         self.env = env
         self.u = env.unwrapped
         self.num_envs = self.u.num_envs
@@ -96,7 +99,7 @@ class GpuVecEnv:
         self._done_count = torch.zeros((), device=self.device)
         self._obs = None
         # ring of the last `window` finished episodes (return, length); filled without host syncs
-        self.window = window
+        self.window = window = int(window or min(100, self.num_envs))
         self._ep_ret = torch.zeros(window, device=self.device)
         self._ep_len = torch.zeros(window, device=self.device)
         self._ep_total = torch.zeros((), dtype=torch.long, device=self.device)

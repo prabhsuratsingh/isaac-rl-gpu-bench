@@ -55,6 +55,19 @@ def load_runs(gpu_dir: Path, exps: list[str] | None) -> list[dict]:
     return runs
 
 
+def host_cpu(run: dict, gpu_dir: Path) -> str | None:
+    """Host CPU of a run: recorded by sysinfo since step 1c; older runs via the pulled Vast instance record."""
+    sys_ = run["meta"].get("sys", {}) or {}
+    cpu = (sys_.get("cpu") or {}).get("model") or (sys_.get("vast") or {}).get("host_cpu")
+    if cpu:
+        return cpu
+    cid = (sys_.get("vast") or {}).get("container_id")
+    f = gpu_dir / "_instance" / str(cid) / "vast_instance.json"
+    if cid and f.exists():
+        return json.loads(f.read_text()).get("cpu_name")
+    return None
+
+
 def final_reward(rows, k=5):
     r = [x["reward_mean"] for x in rows if x.get("reward_mean") is not None]
     return float(np.mean(r[-k:])) if r else np.nan
@@ -91,7 +104,7 @@ def bootstrap_ci(x, n=10000, alpha=0.05, seed=0):
 
 
 # ---------------------------------------------------------------------------------------------- tables
-def run_table(runs, thresholds) -> pd.DataFrame:
+def run_table(runs, thresholds, gpu_dir: Path | None = None) -> pd.DataFrame:
     out = []
     for r in runs:
         tau = (thresholds.get(r["task"]) or {}).get("tau")
@@ -110,6 +123,7 @@ def run_table(runs, thresholds) -> pd.DataFrame:
             "model_rollouts_per_s": float(np.median([x["model_rollouts_per_s"] for x in rows if x.get("model_rollouts_per_s")]))
             if any(x.get("model_rollouts_per_s") for x in rows) else None,
             "gpu": (r["meta"].get("sys", {}).get("gpu", {}) or {}).get("name"),
+            "cpu": host_cpu(r, gpu_dir) if gpu_dir else None,
             "git_sha": (r["meta"].get("sys", {}) or {}).get("git_sha"),
         }
         rec.update({f"share_{k}": v for k, v in phase_shares(rows).items()})
@@ -333,7 +347,12 @@ def main():
     thresholds = yaml.safe_load(a.thresholds.read_text()) if a.thresholds.exists() else {}
     out_dir = a.gpu_dir / "analysis"
     out_dir.mkdir(exist_ok=True)
-    df = run_table(runs, thresholds)
+    df = run_table(runs, thresholds, a.gpu_dir)
+    for task, g in df.groupby("task"):
+        cpus = sorted(g.cpu.fillna("unknown").unique())
+        if len(cpus) > 1:  # protocol section 8: one comparison = one host
+            print(f"WARNING: {task} mixes host CPUs {cpus}; wall-clock comparisons across them are confounded "
+                  f"(launch-bound code is CPU-sensitive). Compare within one instance.", file=sys.stderr)
     df.to_csv(out_dir / "runs.csv", index=False)
     s = summary_table(df)
     s.to_csv(out_dir / "summary.csv", index=False)

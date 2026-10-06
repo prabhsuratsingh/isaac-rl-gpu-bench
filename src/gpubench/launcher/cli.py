@@ -108,11 +108,12 @@ def cmd_doctor(a):
 
 def cmd_offers(a):
     offers = I.search(a.gpu, limit=a.n)
-    print(f"{'offer':>10} {'gpu':<14} {'$/hr':>6} {'rel':>5} {'cuda':>5} {'drv':<10} {'down':>6} {'cpu':>4} {'ram':>5}  location")
+    print(f"{'offer':>10} {'gpu':<10} {'$/hr':>6} {'rel':>5} {'cuda':>5} {'down':>6} {'cores':>5}  {'cpu':<38} location")
     for o in offers:
-        print(f"{o['id']:>10} {o.get('gpu_name', ''):<14} {o.get('dph_total', 0):>6.3f} {o.get('reliability2', o.get('reliability', 0)):>5.3f} "
-              f"{o.get('cuda_max_good', ''):>5} {str(o.get('driver_version', '')):<10} {o.get('inet_down', 0):>6.0f} "
-              f"{o.get('cpu_cores_effective', 0):>4.0f} {o.get('cpu_ram', 0) / 1024:>5.0f}  {o.get('geolocation', '')}")
+        cpu = (o.get("cpu_name") or "?").replace(" Processor", "").replace("-Core", "c")[:38]
+        print(f"{o['id']:>10} {o.get('gpu_name', ''):<10} {o.get('dph_total', 0):>6.3f} {o.get('reliability2', o.get('reliability', 0)):>5.3f} "
+              f"{o.get('cuda_max_good', ''):>5} {o.get('inet_down', 0):>6.0f} {o.get('cpu_cores_effective', 0):>5.0f}  {cpu:<38} "
+              f"{o.get('geolocation', '')}")
     return 0
 
 
@@ -453,10 +454,12 @@ def main(argv=None):
     sp = add("offers", cmd_offers, "list cheapest matching offers")
     sp.add_argument("gpu")
     sp.add_argument("-n", type=int, default=10)
+    sp.add_argument("--cpu", help="regex on host CPU name, e.g. 'EPYC 9' (comparisons should pin the host CPU class)")
     for name, fn, h in [("up", cmd_up, "create instance + bootstrap"), ("smoke", cmd_smoke, "up + smoke test + pull + destroy")]:
         sp = add(name, fn, h)
         sp.add_argument("gpu")
         sp.add_argument("--offer", type=int)
+        sp.add_argument("--cpu", help="regex on host CPU name (see `offers --cpu`)")
         sp.add_argument("--allow-dirty", action="store_true")
         if name == "up":
             sp.add_argument("--no-wait", action="store_true")
@@ -492,12 +495,15 @@ def main(argv=None):
     sp.add_argument("gpu")
     sp.add_argument("exp", nargs="+")
     sp.add_argument("--offer", type=int)
+    sp.add_argument("--cpu", help="regex on host CPU name (see `offers --cpu`)")
     sp.add_argument("--instance", help="reuse a running instance instead of creating one (kept afterwards)")
     sp.add_argument("--keep", action="store_true", help="do not destroy at the end")
     sp.add_argument("--max-hours", type=float, default=12.0, help="watchdog: pull + destroy after this long")
     sp.add_argument("--allow-dirty", action="store_true")
 
     a = p.parse_args(argv)
+    if getattr(a, "cpu", None):
+        os.environ["GPUBENCH_CPU_REGEX"] = a.cpu
     os.chdir(I.ROOT)  # state dir / results are relative to the repo root
     return a.fn(a)
 

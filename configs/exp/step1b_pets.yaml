@@ -1,9 +1,0 @@
-# Re-run of naive PETS after the reward-metric fix (last-100-episodes window, same as PPO's rsl_rl
-# rewbuffer). Supersedes the PETS curves in step1_pets for time-to-threshold; step1_pets stays archived.
-name: step1b_pets
-timeout_min: 60
-jobs:
-  - matrix:
-      algo: [pets_naive]
-      task: [cartpole]
-      seed: [0, 1, 2, 3, 4]

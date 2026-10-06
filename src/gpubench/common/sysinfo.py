@@ -42,6 +42,30 @@ def _nvidia_smi() -> dict:
     return dict(zip(keys, [v.strip() for v in first.split(",")]))
 
 
+def _cpu() -> dict:
+    """Host CPU. Launch-bound GPU code (naive PyTorch loops) is CPU-sensitive: on two RTX 4090 hosts,
+    naive PETS planning ran 2.2x slower on a Threadripper 2950X than on an EPYC 9684X."""
+    out = {"logical_cpus": os.cpu_count()}
+    try:
+        info = open("/proc/cpuinfo").read()
+        for line in info.splitlines():
+            if line.startswith("model name"):
+                out["model"] = line.split(":", 1)[1].strip()
+                break
+        out["mhz_max"] = None
+        mx = "/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq"
+        if os.path.exists(mx):
+            out["mhz_max"] = int(open(mx).read()) // 1000
+    except OSError:
+        out["model"] = platform.processor() or None
+    try:  # CPUs actually available to this container (Vast caps them via cgroups)
+        quota, period = open("/sys/fs/cgroup/cpu.max").read().split()
+        out["cgroup_cpus"] = None if quota == "max" else round(int(quota) / int(period), 2)
+    except (OSError, ValueError):
+        pass
+    return out
+
+
 def collect() -> dict:
     info: dict = {
         "hostname": platform.node(),
@@ -50,6 +74,7 @@ def collect() -> dict:
         "git_sha": _git_sha(),
         "packages": _pkg_versions(),
         "gpu": _nvidia_smi(),
+        "cpu": _cpu(),
         "cuda_driver_max": None,
         "vast": {
             "container_id": os.environ.get("CONTAINER_ID") or os.environ.get("VAST_CONTAINERLABEL"),
@@ -57,6 +82,7 @@ def collect() -> dict:
             "offer_id": os.environ.get("GPUBENCH_OFFER_ID"),
             "dph": float(os.environ["GPUBENCH_DPH"]) if os.environ.get("GPUBENCH_DPH") else None,
             "image": os.environ.get("GPUBENCH_IMAGE"),
+            "host_cpu": os.environ.get("GPUBENCH_HOST_CPU"),
         },
     }
     smi = _run(["nvidia-smi"])

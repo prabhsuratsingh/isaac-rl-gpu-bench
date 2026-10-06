@@ -209,6 +209,7 @@ def test_gpuvecenv_episode_window():
     pytest.importorskip("gymnasium")
     from gpubench.envs.isaac import GpuVecEnv
 
+    assert GpuVecEnv(_FakeEnv(4)).window == 4  # default min(100, num_envs)
     env = GpuVecEnv(_FakeEnv(4), window=5)
     env.reset()
     finished = []  # reference: python bookkeeping of (return) per finished episode, in order

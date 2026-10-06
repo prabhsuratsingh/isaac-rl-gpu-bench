@@ -1,0 +1,16 @@
+# Cartpole head-to-head on ONE instance (one host CPU), after two fixes found in step 1b:
+#   * PETS reward window = min(100, num_envs) episodes (a 100-episode window lagged ~the whole run with 32 envs)
+#   * comparisons must share the host: naive PETS ran 2.2x slower on a Threadripper 2950X host than on an
+#     EPYC 9684X host with the same RTX 4090, so PPO is re-run here next to PETS.
+# Supersedes step1_pets / step1b_pets for the Cartpole comparison; step1_ppo stays the threshold source.
+name: step1c_cartpole
+timeout_min: 60
+jobs:
+  - matrix:
+      algo: [ppo]
+      task: [cartpole]
+      seed: [0, 1, 2, 3, 4]
+  - matrix:
+      algo: [pets_naive]
+      task: [cartpole]
+      seed: [0, 1, 2, 3, 4]

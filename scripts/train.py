@@ -59,7 +59,9 @@ def main(argv: list[str]) -> int:
             summary.update(run(cfg, logger, env, env_cfg, timer))
         elif algo == "pets":
             from gpubench.algos.pets.run import run
-            summary.update(run(cfg, logger, GpuVecEnv(env, clip_actions=cfg["algo"].get("clip_actions", 1.0)), env_cfg, timer))
+            venv = GpuVecEnv(env, clip_actions=cfg["algo"].get("clip_actions", 1.0), window=cfg["algo"].get("reward_window"))
+            summary["reward_window"] = venv.window
+            summary.update(run(cfg, logger, venv, env_cfg, timer))
         else:
             raise ValueError(f"unknown algo {algo!r}")
     except Exception:

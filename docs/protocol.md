@@ -49,7 +49,7 @@ The question is when a learned model beats massively parallel simulation. This d
 | `env_steps_per_s` | env transitions per wall-clock second over the log interval, with everything included (sim, planning, learning) |
 | `model_rollouts_per_s` | model transitions (particle × horizon step) evaluated per second of planner time |
 | `planner_steps_per_s` | real-env actions produced per second of planner time (`num_envs` × plan calls / plan time) |
-| `reward_mean` | mean undiscounted return of the **last 100 finished training episodes**, for every method: rsl_rl's rewbuffer for PPO, an on-GPU ring in `GpuVecEnv` for model-based methods. Both come from the behaviour policy that actually collects the data. (Step-1 PETS runs, `step1_pets`, used the episodes finished within the log interval instead; they are superseded by `step1b_pets`.) |
+| `reward_mean` | mean undiscounted return of the **last min(100, num_envs) finished training episodes**: rsl_rl's 100-episode rewbuffer for PPO (4096 envs), an on-GPU ring in `GpuVecEnv` for model-based methods (32 envs, so 32 episodes). The rule gives every method about the same lag, one episode duration. A fixed 100-episode window would span about 3 generations of episodes at 32 envs; in `step1b_pets` it still held the random-action episodes at the end of training and reported about 120 while the policy scored 250-298. Returns come from the behaviour policy that actually collects the data. |
 | **wall-clock to threshold** (headline) | `wall_s` at the first log row where `reward_mean ≥ τ_task` and the next row also satisfies it. `wall_s` starts after Isaac Sim boot, so boot is the same for all methods and is reported separately in `smoke.json`. It includes env creation. |
 | samples to threshold | `env_steps` at the same row |
 | GPU-hours per solved task | wall-clock to threshold / 3600 (1 GPU). Cost in $ = GPU-hours × the instance's $/hr from `run_meta.json`. |
@@ -120,9 +120,12 @@ bash scripts/profile.sh <name> algo=<a> task=<t> seed=0 profile.start=<i0> profi
 - Software: the same lock file, base image and commit on every GPU. The launcher refuses dirty or unpushed trees.
 - Each instance runs `scripts/smoke_test.py` before any job, and its report (`smoke.json`: boot time and random-action env-steps/s per task) is archived with the results.
 - Only one job runs on a GPU at a time.
+- **One comparison = one host.** Every method in a comparison table runs on the same instance, so the GPU *and* the host CPU are the same, and PPO is re-run next to each new method. Reason: launch-bound code is CPU-sensitive. On two RTX 4090 hosts, naive PETS planning took 157 ms/call on a Threadripper 2950X against 71 ms on an EPYC 9684X (2.2×); model training was 2.0× slower and simulation 1.4× slower. The host CPU is recorded in every `run_meta.json` (`sys.cpu`). `analyze.py` warns when a task's runs mix CPUs, and `gpubench-vast offers/up/exp --cpu REGEX` pins the CPU class.
+- **Cross-host reproducibility (measured):** with the same seed, lock file and GPU model, the PETS Cartpole learning signal was bit-identical across two hosts with different CPUs and drivers (570.86 vs 595.71): 95/95 log rows identical over 5 seeds.
 - Known risk: A100 and H100 have no RT cores, and Isaac Sim officially targets RTX GPUs. Headless PhysX support is checked with `gpubench-vast smoke a100` before we plan runs there.
 
 ## 9. Change log
 
 - v0.1: initial protocol (step 1).
+- v0.3 (2026-10-06): reward window = min(100, num_envs); one comparison = one host (CPU recorded, `--cpu` filter); cross-host reproducibility measured.
 - v0.2 (2026-10-06): τ frozen; `reward_mean` unified to last-100 episodes for all methods; Nsight GPU-busy attribution; base image digest guard (`infra/gpus.yaml: image_digest`).

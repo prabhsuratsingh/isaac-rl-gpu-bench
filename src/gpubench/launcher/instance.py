@@ -68,6 +68,7 @@ def gpu_spec(alias: str) -> dict:
         "disk_gb": g.get("disk_gb", d["disk_gb"]),
         "query": f"{d['base_query']} {g['query']}",
         "env": {**d.get("env", {}), **g.get("env", {})},
+        "cpu_regex": g.get("cpu_regex", d.get("cpu_regex")),
     }
 
 
@@ -165,10 +166,18 @@ def resolve_id(ident: str | int | None) -> int:
 # ----------------------------------------------------------------------------------------------------
 # Vast operations
 # ----------------------------------------------------------------------------------------------------
-def search(alias: str, limit: int = 10) -> list[dict]:
+def search(alias: str, limit: int = 10, cpu: str | None = None) -> list[dict]:
+    """Cheapest matching offers. `cpu` (or $GPUBENCH_CPU_REGEX, or gpus.yaml `cpu_regex`) is a regex on the
+    host CPU name: launch-bound code is CPU-sensitive, so comparisons pin the host CPU class too."""
+    import re
+
     spec = gpu_spec(alias)
-    offers = vast_client().search_offers(query=spec["query"], order="dph", limit=limit * 3, storage=spec["disk_gb"])
+    cpu = cpu or os.environ.get("GPUBENCH_CPU_REGEX") or spec.get("cpu_regex")
+    offers = vast_client().search_offers(query=spec["query"], order="dph", limit=limit * (10 if cpu else 3),
+                                         storage=spec["disk_gb"])
     offers = sorted(offers or [], key=lambda o: o.get("dph_total", 1e9))
+    if cpu:
+        offers = [o for o in offers if re.search(cpu, o.get("cpu_name") or "", re.IGNORECASE)]
     return offers[:limit]
 
 
@@ -197,6 +206,8 @@ def create(alias: str, offer_id: int | None, git: dict, label: str | None = None
     }
     if offer.get("dph_total"):
         env["GPUBENCH_DPH"] = f"{offer['dph_total']:.4f}"
+    if offer.get("cpu_name"):
+        env["GPUBENCH_HOST_CPU"] = offer["cpu_name"]
     res = vast_client().create_instance(
         id=int(offer["id"]), image=spec["image"], disk=spec["disk_gb"], env=env, onstart_cmd=ONSTART,
         label=label or f"gpubench-{alias}", ssh=True, direct=True,
@@ -205,7 +216,7 @@ def create(alias: str, offer_id: int | None, git: dict, label: str | None = None
         raise SystemExit(f"create_instance failed: {res}")
     inst_id = int(res["new_contract"])
     remember(inst_id, gpu=alias, offer_id=offer["id"], dph=offer.get("dph_total"), git_sha=git["sha"],
-             image=spec["image"], created=time.time(), gpu_name=offer.get("gpu_name"))
+             image=spec["image"], created=time.time(), gpu_name=offer.get("gpu_name"), cpu_name=offer.get("cpu_name"))
     return {"id": inst_id, "offer": offer}
 
 
