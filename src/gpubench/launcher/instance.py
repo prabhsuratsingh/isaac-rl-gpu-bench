@@ -179,13 +179,13 @@ def create(alias: str, offer_id: int | None, git: dict, label: str | None = None
         raise SystemExit("GPUBENCH_GH_TOKEN not set (read-only fine-grained PAT for the repo; put it in .env)")
     spec = gpu_spec(alias)
     check_image(spec, allow_drift=os.environ.get("GPUBENCH_ALLOW_IMAGE_DRIFT") == "1")
+    offers = search(alias, limit=10)
     if offer_id is None:
-        offers = search(alias, limit=1)
         if not offers:
             raise SystemExit(f"no offers match infra/gpus.yaml:{alias}: {spec['query']}")
         offer = offers[0]
-    else:
-        offer = {"id": offer_id, "dph_total": None}
+    else:  # keep the price when the chosen offer is among the current matches
+        offer = next((o for o in offers if o["id"] == offer_id), {"id": offer_id, "dph_total": None})
     env = {
         **spec["env"],
         "GH_TOKEN": token,
@@ -225,12 +225,20 @@ def destroy(inst_id: int):
     forget(inst_id)
 
 
-def wait_running(inst_id: int, timeout_s: int = 1800, poll_s: int = 15) -> dict:
+def wait_running(inst_id: int, timeout_s: int = 1800, poll_s: int = 15, stuck_created_s: int = 600) -> dict:
     t0 = time.time()
     last = None
+    created_since = None
     while time.time() - t0 < timeout_s:
         inst = show(inst_id) or {}
         status = inst.get("actual_status")
+        # 'created' = image loaded but the host never started the container; it rarely recovers
+        if status == "created":
+            created_since = created_since or time.time()
+            if time.time() - created_since > stuck_created_s:
+                raise RuntimeError(f"instance {inst_id} stuck in 'created' for {stuck_created_s}s (host did not start it)")
+        else:
+            created_since = None
         msg = (inst.get("status_msg") or "").strip()[:120]
         if (status, msg) != last:
             print(f"  [{int(time.time() - t0):4d}s] status={status} {msg}")

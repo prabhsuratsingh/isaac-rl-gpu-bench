@@ -63,6 +63,15 @@ bash scripts/profile.sh prof_test algo=pets_naive task=cartpole profile.start=15
 
 Configs are `configs/algo/<algo>.yaml` + `configs/task/<task>.yaml` (including that task's `algo_overrides`) + `key=value` overrides on the command line. Experiments (`configs/exp/*.yaml`) are job matrices.
 
+## Analysis and the research log
+
+```powershell
+pip install -e ".[analysis]"
+python scripts/analyze.py results/rtx4090 --exps step1_ppo step1b_pets --paper step1b
+```
+
+This writes tables and figures to `results/rtx4090/analysis/`. With `--paper <tag>` it also copies them into `docs/paper/generated/`, where the LaTeX research log [docs/paper/findings.tex](docs/paper/findings.tex) picks them up. That log is updated with every useful finding.
+
 ## Layout
 
 | path | what |

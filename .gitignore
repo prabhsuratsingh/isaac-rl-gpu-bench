@@ -14,3 +14,5 @@ logs/
 outputs/
 *.nsys-rep
 *.sqlite
+
+docs/paper/

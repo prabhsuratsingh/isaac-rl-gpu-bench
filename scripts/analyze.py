@@ -135,6 +135,35 @@ def _fmt(m, lo, hi, digits=3):
     return f"{f(m)} [{f(lo)}, {f(hi)}]" if np.isfinite(lo) else f(m)
 
 
+def _tex_num(m, lo, hi):
+    if m is None or not np.isfinite(m):
+        return "--"
+
+    def f(v):
+        a = abs(v)
+        if a >= 1e5:
+            e = int(np.floor(np.log10(a)))
+            return f"{v / 10**e:.2f}\\times10^{{{e}}}"
+        if a >= 1000:
+            return f"{v:,.0f}".replace(",", "{,}")
+        return f"{v:.3g}"
+
+    return f"${f(m)}$ {{\\scriptsize [${f(lo)}$, ${f(hi)}$]}}" if np.isfinite(lo) else f"${f(m)}$"
+
+
+def summary_latex(s: pd.DataFrame) -> str:
+    """booktabs tabular, \\input-able from docs/paper/findings.tex (needs \\usepackage{booktabs})."""
+    lines = [r"\begin{tabular}{llrrrrr}", r"\toprule",
+             r"task & method & solved & final return & wall-clock to $\tau$ (s) & env steps to $\tau$ & \$ to $\tau$ \\",
+             r"\midrule"]
+    for _, r in s.iterrows():
+        cells = [r.task, f"{r.algo.upper()} ({r.impl})", f"{r.solved}/{r.seeds}"] + [
+            _tex_num(r[c], r[c + "_lo"], r[c + "_hi"]) for c in ["final_reward", "wall_to_tau_s", "steps_to_tau", "usd_to_tau"]]
+        lines.append(" & ".join(cells) + r" \\")
+    lines += [r"\bottomrule", r"\end{tabular}"]
+    return "\n".join(lines) + "\n"
+
+
 def summary_markdown(s: pd.DataFrame) -> str:
     lines = ["| task | method | solved | final reward | wall-clock to τ (s) | env steps to τ | $ to τ | env steps/s |",
              "|---|---|---|---|---|---|---|---|"]
@@ -177,6 +206,23 @@ def _mean_curve(seed_curves, log=True, n=200):
     return grid, m, lo, hi
 
 
+def _plain_log_ticks(ax):
+    from matplotlib.ticker import FuncFormatter, LogLocator, NullFormatter
+
+    def fmt(v, _):
+        if v >= 1e6:
+            return f"{v / 1e6:g}M"
+        if v >= 1e3:
+            return f"{v / 1e3:g}k"
+        return f"{v:g}"
+
+    lo, hi = ax.get_xlim()
+    decades = np.log10(hi / lo) if lo > 0 else 9
+    ax.xaxis.set_major_locator(LogLocator(base=10, subs=(1.0, 2.0, 5.0) if decades <= 2.5 else (1.0,)))
+    ax.xaxis.set_major_formatter(FuncFormatter(fmt))
+    ax.xaxis.set_minor_formatter(NullFormatter())
+
+
 def plot_curves(runs, thresholds, out_dir: Path, gpu_label: str):
     import matplotlib.pyplot as plt
 
@@ -209,6 +255,7 @@ def plot_curves(runs, thresholds, out_dir: Path, gpu_label: str):
                     ax.plot([], [], color=color, label=label)
             tau = (thresholds.get(task) or {}).get("tau")
             ax.set_xscale("log")
+            _plain_log_ticks(ax)
             if tau is not None:
                 ax.axhline(tau, color=INK2, linestyle=(0, (4, 3)), linewidth=1)
                 ax.annotate(f"τ = {tau:g}", (0.01, tau), xycoords=("axes fraction", "data"), xytext=(0, 4),
@@ -217,7 +264,9 @@ def plot_curves(runs, thresholds, out_dir: Path, gpu_label: str):
             ax.set_ylabel("episode return (last 100 episodes)")
         axes[0].set_title(f"{task}: reward vs wall-clock ({gpu_label})", loc="left")
         axes[1].set_title(f"{task}: reward vs samples", loc="left")
-        axes[1].legend(loc="upper left", bbox_to_anchor=(0, 0.93))  # below the τ label, clear of curve-end labels
+        # one shared legend under both panels: never collides with τ or the curve-end labels
+        handles, labels = axes[0].get_legend_handles_labels()
+        fig.legend(handles, labels, loc="outside lower center", ncol=max(1, len(labels)))
         fig.savefig(out_dir / f"curves_{task}.png", dpi=200)
         plt.close(fig)
 
@@ -266,6 +315,7 @@ def main():
     p.add_argument("--thresholds", type=Path, default=ROOT / "configs" / "thresholds.yaml")
     p.add_argument("--derive-thresholds", action="store_true")
     p.add_argument("--no-plots", action="store_true")
+    p.add_argument("--paper", metavar="TAG", help="also copy figures + LaTeX table to docs/paper/generated/<gpu>_<TAG>_*")
     a = p.parse_args()
 
     runs = load_runs(a.gpu_dir, a.exps)
@@ -296,6 +346,16 @@ def main():
         plot_curves(runs, thresholds, out_dir, gpu_label)
         plot_breakdown(df, out_dir, gpu_label)
         print(f"\nfigures -> {out_dir}")
+    (out_dir / "summary.tex").write_text(summary_latex(s), encoding="utf-8")
+    if a.paper:
+        import shutil
+
+        gen = ROOT / "docs" / "paper" / "generated"
+        gen.mkdir(parents=True, exist_ok=True)
+        prefix = f"{a.gpu_dir.name}_{a.paper}"
+        for f in list(out_dir.glob("*.png")) + [out_dir / "summary.tex"]:
+            shutil.copy2(f, gen / f"{prefix}_{f.name}")
+        print(f"paper artefacts -> {gen} ({prefix}_*)")
 
 
 if __name__ == "__main__":

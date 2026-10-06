@@ -116,18 +116,55 @@ def cmd_offers(a):
     return 0
 
 
-def _up(gpu: str, offer: int | None, allow_dirty: bool, wait: bool = True) -> tuple[int, dict, Remote | None]:
+def _up(gpu: str, offer: int | None, allow_dirty: bool, wait: bool = True,
+        created: list | None = None) -> tuple[int, dict, Remote | None]:
+    """Create + wait. The new id is appended to `created` immediately, so callers can always clean up.
+
+    An instance that never reaches `running` is useless and is destroyed here. One that runs but fails
+    bootstrap is left to the caller (kept by `up` for debugging, destroyed by `exp`/`smoke`).
+    """
     git = I.git_state(allow_dirty=allow_dirty)
     res = I.create(gpu, offer, git)
     inst_id = res["id"]
+    if created is not None:
+        created.append(inst_id)
     price = res["offer"].get("dph_total")
     print(f"created instance {inst_id} on offer {res['offer']['id']} ({f'${price:.3f}' if price else 'price on start'}/hr) @ {git['sha'][:10]}")
     if not wait:
         return inst_id, {}, None
-    inst = I.wait_running(inst_id)
+    try:
+        inst = I.wait_running(inst_id)
+    except BaseException:
+        print(f"instance {inst_id} never started; destroying it (try another offer: `gpubench-vast offers {gpu}`)")
+        I.destroy(inst_id)
+        if created is not None:
+            created.remove(inst_id)
+        raise
     rem = I.wait_ready(inst)
     _stamp_price(rem, inst)
     return inst_id, inst, rem
+
+
+def _up_with_retry(gpu: str, offer: int | None, allow_dirty: bool, created: list, attempts: int = 3):
+    """`_up`, moving on to the next-cheapest offer when a host never starts its container."""
+    if offer is not None:
+        return _up(gpu, offer, allow_dirty, created=created)
+    tried: set = set()
+    last_err = None
+    for _ in range(attempts):
+        cands = [o for o in I.search(gpu, limit=10) if o["id"] not in tried]
+        if not cands:
+            break
+        tried.add(cands[0]["id"])
+        n_before = len(created)
+        try:
+            return _up(gpu, cands[0]["id"], allow_dirty, created=created)
+        except (RuntimeError, TimeoutError) as e:
+            if len(created) > n_before:  # started but failed later (bootstrap): not a host-start problem
+                raise
+            last_err = e
+            print(f"offer {cands[0]['id']} failed to start ({e}); trying the next one")
+    raise RuntimeError(f"no {gpu} offer started after {len(tried)} attempt(s): {last_err}")
 
 
 def _stamp_price(rem: Remote, inst: dict):
@@ -341,13 +378,14 @@ def cmd_exp(a):
     for f in a.exp:
         expand(f)  # validate before paying for a GPU
     inst_id = None
+    created: list = []
     code = 1
     deadline = time.time() + a.max_hours * 3600
     try:
         if a.instance:
             inst_id, inst, rem = _remote(a.instance)
         else:
-            inst_id, inst, rem = _up(a.gpu, a.offer, a.allow_dirty)
+            inst_id, inst, rem = _up_with_retry(a.gpu, a.offer, a.allow_dirty, created)
         sha = I.load_state().get(str(inst_id), {}).get("git_sha")
         failed = False
         for f in a.exp:
@@ -361,10 +399,11 @@ def cmd_exp(a):
     except Exception as e:
         print(f"ERROR: {e}")
     finally:
+        inst_id = inst_id if inst_id is not None else (created[-1] if created else None)
         if inst_id is not None:
             try:
                 inst = I.show(inst_id)
-                if inst:
+                if inst and inst.get("actual_status") == "running":
                     _pull(inst_id, inst, Remote.from_instance(inst))
             except Exception as e:
                 print(f"final pull failed: {e}")
@@ -378,13 +417,15 @@ def cmd_exp(a):
 def cmd_smoke(a):
     """Boot + bootstrap + smoke test on a GPU class, pull the report, destroy. (~15-25 min)"""
     inst_id = None
+    created: list = []
     try:
-        inst_id, inst, rem = _up(a.gpu, a.offer, a.allow_dirty)
+        inst_id, inst, rem = _up_with_retry(a.gpu, a.offer, a.allow_dirty, created)
         dest = _pull(inst_id, inst, rem)
         print((dest / "_instance" / str(inst_id) / "smoke.json").read_text())
         return 0
     except Exception as e:
         print(f"SMOKE FAILED on {a.gpu}: {e}")
+        inst_id = inst_id if inst_id is not None else (created[-1] if created else None)
         if inst_id is not None:
             try:
                 inst = I.show(inst_id)
@@ -393,6 +434,7 @@ def cmd_smoke(a):
                 pass
         return 1
     finally:
+        inst_id = inst_id if inst_id is not None else (created[-1] if created else None)
         if inst_id is not None and not a.keep:
             I.destroy(inst_id)
 
