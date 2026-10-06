@@ -4,7 +4,6 @@
 #
 # Base image already ships torch 2.7.0+cu128 and Python 3.11 (see infra/gpus.yaml: image).
 --extra-index-url https://pypi.nvidia.com
-isaaclab[isaacsim,all]==2.3.2.post1
-rsl-rl-lib==3.1.2
+isaaclab[isaacsim,all]==2.3.2.post1   # pins rsl-rl-lib==3.0.1 itself (the PyPI wheel, not the GitHub tag's 3.1.2)
 pandas
 pytest

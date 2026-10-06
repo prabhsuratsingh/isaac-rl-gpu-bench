@@ -16,7 +16,7 @@ The question is when a learned model beats massively parallel simulation. This d
 | `ant`      | `Isaac-Ant-Direct-v0`                    | 36  | 8   | 1/60 s     | 900 steps | approx. port (progress) |
 | `anymal`   | `Isaac-Velocity-Flat-Anymal-C-Direct-v0` | 48  | 12  | 1/50 s     | 1000 steps| not ported (PPO only in step 1) |
 
-- **Software stack:** Isaac Lab 2.3.2.post1, Isaac Sim 5.1 (PhysX GPU), torch 2.7.0+cu128, rsl-rl-lib 3.1.2 and Python 3.11. The exact package set is `requirements/remote.lock.txt` on top of the pinned base image in `infra/gpus.yaml`.
+- **Software stack:** Isaac Lab 2.3.2.post1, Isaac Sim 5.1 (PhysX GPU), torch 2.7.0+cu128, rsl-rl-lib 3.0.1 (pinned by the isaaclab wheel) and Python 3.11. The exact package set is `requirements/remote.lock.txt` on top of the pinned base image in `infra/gpus.yaml`.
 - **Env config:** the Isaac Lab defaults for every task, plus only the overrides listed in `configs/task/*.yaml`.
 - **Cost functions:** model-based methods plan with the torch reward/termination functions in `src/gpubench/envs/costs.py`. They are validated against the simulator's own rewards by `scripts/check_costs.py`, and the results are stored in `results/<gpu>/checks/`. Cartpole must match within 1e-4. For Ant we report the correlation and the mean absolute error.
 - **Sim-cost knob (crossover):** `task.sim_substep_mult = k` divides `sim.dt` by k and multiplies `decimation` by k. Control rate, episode length and the obs/action spaces are unchanged, and each env step costs about k× the physics.
