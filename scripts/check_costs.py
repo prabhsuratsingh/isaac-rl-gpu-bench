@@ -64,9 +64,9 @@ def main():
     out = ROOT / "results" / "checks"
     out.mkdir(parents=True, exist_ok=True)
     (out / f"costs_{args.task}.json").write_text(json.dumps(res, indent=2))
-    env.close()
-    app.close()
-    return 0 if res["pass"] else 1
+    from gpubench.envs.isaac import shutdown
+
+    shutdown(app, 0 if res["pass"] else 1, env)  # does not return
 
 
 if __name__ == "__main__":

@@ -70,10 +70,9 @@ def main(argv: list[str]) -> int:
         summary["status"] = status
         logger.close(summary)
         print(f"[train] {status}: {logger.dir}", flush=True)
-        if env is not None:
-            env.close()
-        app.close()
-    return 0 if status == "ok" else 1
+    from gpubench.envs.isaac import shutdown
+
+    shutdown(app, 0 if status == "ok" else 1, env)  # does not return
 
 
 if __name__ == "__main__":

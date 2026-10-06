@@ -16,6 +16,27 @@ def launch_app(device: str = "cuda:0", headless: bool = True, **kwargs):
     return launcher.app
 
 
+def shutdown(app, code: int = 0, env=None):
+    """End the process with a meaningful exit code.
+
+    `SimulationApp.close()` terminates the interpreter itself with status 0, so nothing after it runs and
+    a failed run would look successful. Flush output first; only use the regular Kit shutdown on success.
+    """
+    import os
+    import sys
+
+    if env is not None:
+        try:
+            env.close()
+        except Exception as e:  # noqa: BLE001
+            print(f"[shutdown] env.close failed: {e}", flush=True)
+    sys.stdout.flush()
+    sys.stderr.flush()
+    if code == 0 and app is not None:
+        app.close()  # does not return
+    os._exit(code)
+
+
 def make_env_cfg(task: dict, device: str, seed: int, num_envs: int | None = None):
     """Registered Isaac Lab env cfg + our overrides (num_envs, sim-cost knob)."""
     import isaaclab_tasks  # noqa: F401  (registers the gym ids)

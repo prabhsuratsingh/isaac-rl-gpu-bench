@@ -52,9 +52,7 @@ def single(task_name: str, num_envs: int, steps: int, device: str) -> dict:
         "env_steps_per_s": round(num_envs * steps / dt, 1), "obs_dim": int(obs["policy"].shape[-1]), "act_dim": int(act_dim),
         "gpu": torch.cuda.get_device_name(0),
     }
-    env.close()
-    app.close()
-    return res
+    return res, app, env
 
 
 def main():
@@ -68,9 +66,11 @@ def main():
     args = p.parse_args()
 
     if args.task:  # child mode: print one JSON line prefixed for the parent to find
-        res = single(args.task, args.num_envs, args.steps, args.device)
-        print("SMOKE_RESULT " + json.dumps(res), flush=True)
-        return 0
+        from gpubench.envs.isaac import shutdown
+
+        res, app, env = single(args.task, args.num_envs, args.steps, args.device)
+        print("SMOKE_RESULT " + json.dumps(res), flush=True)  # before shutdown: app.close() ends the process
+        shutdown(app, 0, env)
 
     from gpubench.common import sysinfo
 
