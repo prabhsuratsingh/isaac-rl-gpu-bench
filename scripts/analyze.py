@@ -275,7 +275,7 @@ def plot_curves(runs, thresholds, out_dir: Path, gpu_label: str):
                 ax.annotate(f"τ = {tau:g}", (0.01, tau), xycoords=("axes fraction", "data"), xytext=(0, 4),
                             textcoords="offset points", color=INK2, fontsize=9)
             ax.set_xlabel(xlabel)
-            ax.set_ylabel("episode return (last 100 episodes)")
+            ax.set_ylabel("episode return (recent episodes)")
         axes[0].set_title(f"{task}: reward vs wall-clock ({gpu_label})", loc="left")
         axes[1].set_title(f"{task}: reward vs samples", loc="left")
         # one shared legend under both panels: never collides with τ or the curve-end labels
@@ -329,6 +329,8 @@ def main():
     p.add_argument("--thresholds", type=Path, default=ROOT / "configs" / "thresholds.yaml")
     p.add_argument("--derive-thresholds", action="store_true")
     p.add_argument("--no-plots", action="store_true")
+    p.add_argument("--tau-frac", type=float,
+                   help="secondary threshold: tau = FRAC x PPO final return (e.g. 0.8); outputs get a _frac<FRAC> suffix")
     p.add_argument("--paper", metavar="TAG", help="also copy figures + LaTeX table to docs/paper/generated/<gpu>_<TAG>_*")
     a = p.parse_args()
 
@@ -345,34 +347,43 @@ def main():
         return
 
     thresholds = yaml.safe_load(a.thresholds.read_text()) if a.thresholds.exists() else {}
+    suffix = ""
+    if a.tau_frac:  # secondary thresholds are derived from the same frozen PPO reference returns
+        thresholds = {t: {**v, "tau": round(a.tau_frac * v["ppo_final_mean"], 2)} for t, v in thresholds.items()}
+        suffix = f"_frac{a.tau_frac:.2f}"
     out_dir = a.gpu_dir / "analysis"
     out_dir.mkdir(exist_ok=True)
+    if not a.no_plots and not suffix:
+        for old in out_dir.glob("*.png"):  # figures are per invocation: never ship a stale task's plot
+            old.unlink()
     df = run_table(runs, thresholds, a.gpu_dir)
     for task, g in df.groupby("task"):
         cpus = sorted(g.cpu.fillna("unknown").unique())
         if len(cpus) > 1:  # protocol section 8: one comparison = one host
             print(f"WARNING: {task} mixes host CPUs {cpus}; wall-clock comparisons across them are confounded "
                   f"(launch-bound code is CPU-sensitive). Compare within one instance.", file=sys.stderr)
-    df.to_csv(out_dir / "runs.csv", index=False)
+    df.to_csv(out_dir / f"runs{suffix}.csv", index=False)
     s = summary_table(df)
-    s.to_csv(out_dir / "summary.csv", index=False)
+    s.to_csv(out_dir / f"summary{suffix}.csv", index=False)
     md = summary_markdown(s)
-    (out_dir / "summary.md").write_text(md + "\n", encoding="utf-8")
+    if suffix:
+        md = f"Threshold: tau = {a.tau_frac:g} x PPO final return\n\n" + md
+    (out_dir / f"summary{suffix}.md").write_text(md + "\n", encoding="utf-8")
     print(md)
-    if not a.no_plots:
+    if not a.no_plots and not suffix:
         _style()
         gpu_label = df.gpu.dropna().iloc[0].replace("NVIDIA GeForce ", "").replace("NVIDIA ", "") if df.gpu.notna().any() else a.gpu_dir.name
         plot_curves(runs, thresholds, out_dir, gpu_label)
         plot_breakdown(df, out_dir, gpu_label)
         print(f"\nfigures -> {out_dir}")
-    (out_dir / "summary.tex").write_text(summary_latex(s), encoding="utf-8")
+    (out_dir / f"summary{suffix}.tex").write_text(summary_latex(s), encoding="utf-8")
     if a.paper:
         import shutil
 
         gen = ROOT / "docs" / "paper" / "generated"
         gen.mkdir(parents=True, exist_ok=True)
         prefix = f"{a.gpu_dir.name}_{a.paper}"
-        for f in list(out_dir.glob("*.png")) + [out_dir / "summary.tex"]:
+        for f in ([] if suffix else list(out_dir.glob("*.png"))) + [out_dir / f"summary{suffix}.tex"]:
             shutil.copy2(f, gen / f"{prefix}_{f.name}")
         print(f"paper artefacts -> {gen} ({prefix}_*)")
 

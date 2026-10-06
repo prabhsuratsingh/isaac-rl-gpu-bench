@@ -207,7 +207,7 @@ def create(alias: str, offer_id: int | None, git: dict, label: str | None = None
     if offer.get("dph_total"):
         env["GPUBENCH_DPH"] = f"{offer['dph_total']:.4f}"
     if offer.get("cpu_name"):
-        env["GPUBENCH_HOST_CPU"] = offer["cpu_name"]
+        env["GPUBENCH_HOST_CPU"] = offer["cpu_name"].replace(" ", "_")  # Vast drops env values with spaces
     res = vast_client().create_instance(
         id=int(offer["id"]), image=spec["image"], disk=spec["disk_gb"], env=env, onstart_cmd=ONSTART,
         label=label or f"gpubench-{alias}", ssh=True, direct=True,
