@@ -77,9 +77,11 @@ class GpuVecEnv:
       observation. `valid` marks transitions whose next_obs is a true successor state (not done).
       Model-based learners train only on valid transitions (protocol: 'auto-reset masking').
     * Episode returns are accumulated on-device; `pop_episode_stats()` is the only sync point.
+    * `reward_mean` is over the last `window` finished episodes, the same definition rsl_rl uses for PPO
+      (its 100-episode rewbuffer), so both methods' curves and time-to-threshold are comparable.
     """
 
-    def __init__(self, env, clip_actions: float | None = 1.0):
+    def __init__(self, env, clip_actions: float | None = 1.0, window: int = 100):
         self.env = env
         self.u = env.unwrapped
         self.num_envs = self.u.num_envs
@@ -93,6 +95,11 @@ class GpuVecEnv:
         self._done_len_sum = torch.zeros((), device=self.device)
         self._done_count = torch.zeros((), device=self.device)
         self._obs = None
+        # ring of the last `window` finished episodes (return, length); filled without host syncs
+        self.window = window
+        self._ep_ret = torch.zeros(window, device=self.device)
+        self._ep_len = torch.zeros(window, device=self.device)
+        self._ep_total = torch.zeros((), dtype=torch.long, device=self.device)
 
     def reset(self) -> torch.Tensor:
         obs, _ = self.env.reset()
@@ -111,17 +118,40 @@ class GpuVecEnv:
         self._done_ret_sum += (self._ret * d).sum()
         self._done_len_sum += (self._len * d).sum()
         self._done_count += d.sum()
+        self._record_finished(done)
         self._ret *= 1.0 - d
         self._len *= 1.0 - d
         self._obs = next_obs
         return next_obs, rew, terminated, truncated, extras
 
+    def _record_finished(self, done: torch.Tensor):
+        """Append returns/lengths of envs that just finished into the ring, without boolean indexing.
+
+        Finished envs get consecutive slots via a cumsum over the done mask; unfinished envs are routed
+        to slot `window` of a padded scratch row and dropped.
+        """
+        d = done.long()
+        slot = (self._ep_total + torch.cumsum(d, 0) - 1) % self.window
+        slot = torch.where(done, slot, torch.full_like(slot, self.window))
+        ret = torch.cat([self._ep_ret, self._ep_ret.new_zeros(1)])
+        ln = torch.cat([self._ep_len, self._ep_len.new_zeros(1)])
+        ret.scatter_(0, slot, self._ret)
+        ln.scatter_(0, slot, self._len)
+        self._ep_ret.copy_(ret[: self.window])
+        self._ep_len.copy_(ln[: self.window])
+        self._ep_total += d.sum()
+
     def pop_episode_stats(self) -> dict:
         n = self._done_count.item()
-        out = {"episodes": int(n)}
+        total = int(self._ep_total.item())
+        out = {"episodes": int(n), "episodes_total": total}
         if n > 0:
-            out["reward_mean"] = self._done_ret_sum.item() / n
-            out["ep_len_mean"] = self._done_len_sum.item() / n
+            out["reward_mean_interval"] = self._done_ret_sum.item() / n
+        if total > 0:
+            k = min(total, self.window)
+            # slots [0, k) are filled once total >= k; before the ring wraps that is exactly the first k
+            out["reward_mean"] = self._ep_ret[:k].mean().item()
+            out["ep_len_mean"] = self._ep_len[:k].mean().item()
         self._done_ret_sum.zero_()
         self._done_len_sum.zero_()
         self._done_count.zero_()

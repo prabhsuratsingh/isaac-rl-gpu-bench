@@ -24,7 +24,9 @@ remote = [
     "pandas",
     "pytest",
 ]
-dev = ["pytest", "ruff"]
+# Local analysis of pulled results (scripts/analyze.py, scripts/nsys_breakdown.py).
+analysis = ["numpy", "pandas", "matplotlib"]
+dev = ["pytest", "ruff", "gymnasium"]
 
 [project.scripts]
 gpubench-vast = "gpubench.launcher.cli:main"

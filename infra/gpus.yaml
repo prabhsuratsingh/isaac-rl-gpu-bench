@@ -11,11 +11,14 @@
 
 defaults:
   # Ubuntu 22.04 (GLIBC 2.35), Python 3.11, torch 2.7.0+cu128 preinstalled.
-  # After the first successful launch, pin the digest reported by `gpubench-vast show <id>`
-  # by writing it as  image: pytorch/pytorch@sha256:<digest>  so all GPUs use bit-identical bases.
+  # Vast derives its ssh image name from `repo:tag`, so we launch by tag and *guard* the digest:
+  # `up` checks Docker Hub and refuses to launch if the tag no longer points at image_digest
+  # (verified 2026-10-06 against the tag the first RTX 4090 runs used).
   image: pytorch/pytorch:2.7.0-cuda12.8-cudnn9-runtime
+  image_digest: sha256:7db0e1bf4b1ac274ea09cf6358ab516f8a5c7d3d0e02311bed445f7e236a5d80
   disk_gb: 150
-  base_query: "num_gpus=1 cuda_vers>=12.8 reliability>0.98 inet_down>=500 disk_space>=150 verified=true rentable=true"
+  # geolocation notin [CN]: ~15 GB of GitHub / pypi.nvidia.com downloads per bootstrap are slow or blocked there.
+  base_query: "num_gpus=1 cuda_vers>=12.8 reliability>0.98 inet_down>=500 disk_space>=150 verified=true rentable=true geolocation notin [CN]"
   env:
     OMNI_KIT_ACCEPT_EULA: "Yes"
     ACCEPT_EULA: "Y"

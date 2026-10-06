@@ -180,6 +180,54 @@ def test_ensemble_learns_and_pets_beats_random():
     assert r_pets > r_rand + 5.0, (r_pets, r_rand)
 
 
+# ---------------------------------------------------------------------------------------------- env stats
+class _FakeEnv:
+    """Gym-like vectorised env: env i terminates every (i+2) steps with reward 1 per step."""
+
+    def __init__(self, n):
+        import gymnasium  # noqa: F401  (spaces only)
+        from gymnasium import spaces
+
+        self.unwrapped = self
+        self.num_envs, self.device = n, "cpu"
+        self.single_observation_space = spaces.Dict({"policy": spaces.Box(-1, 1, (3,))})
+        self.single_action_space = spaces.Box(-1, 1, (1,))
+        self.t = torch.zeros(n)
+        self.period = torch.arange(n) + 2.0
+
+    def reset(self):
+        return {"policy": torch.zeros(self.num_envs, 3)}, {}
+
+    def step(self, a):
+        self.t += 1
+        term = self.t >= self.period
+        self.t[term] = 0
+        return {"policy": torch.zeros(self.num_envs, 3)}, torch.ones(self.num_envs), term, torch.zeros_like(term), {}
+
+
+def test_gpuvecenv_episode_window():
+    pytest.importorskip("gymnasium")
+    from gpubench.envs.isaac import GpuVecEnv
+
+    env = GpuVecEnv(_FakeEnv(4), window=5)
+    env.reset()
+    finished = []  # reference: python bookkeeping of (return) per finished episode, in order
+    t = [0] * 4
+    for _ in range(12):
+        env.step(torch.zeros(4, 1))
+        for i in range(4):
+            t[i] += 1
+            if t[i] >= i + 2:
+                finished.append(float(t[i]))
+                t[i] = 0
+    stats = env.pop_episode_stats()
+    assert stats["episodes_total"] == len(finished)
+    assert stats["reward_mean"] == pytest.approx(sum(finished[-5:]) / 5)
+    # ring holds exactly the last `window` returns (as a multiset)
+    assert sorted(env._ep_ret.tolist()) == sorted(finished[-5:])
+    assert stats["episodes"] == len(finished) and env.pop_episode_stats()["episodes"] == 0
+
+
 # ---------------------------------------------------------------------------------------------- timing
 def test_phase_timer_cpu():
     t = PhaseTimer("cpu")

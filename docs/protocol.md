@@ -30,7 +30,7 @@ The question is when a learned model beats massively parallel simulation. This d
 | PETS | `fused` (later): batched ensemble, fused sampling/cost, CUDA graphs, bf16 | one optimisation at a time |
 | MBPO, Dreamer | later steps | |
 
-**GPU-native requirement:** in our own code, planning, model inference, model training and replay run entirely on the GPU. No `.cpu()`, `.item()` or boolean-mask indexing happens inside the act loop. This is enforced by a `sync_debug=error` run (`torch.cuda.set_sync_debug_mode`) in `configs/exp/step1_pets.yaml`. Syncs inside the simulator's `step()` (for example Isaac Lab's reset bookkeeping) are attributed to the `sim` phase, and are the same for every method.
+**GPU-native requirement:** in our own code, planning, model inference, model training and replay run entirely on the GPU. No `.cpu()`, `.item()` or boolean-mask indexing happens inside the act loop. This is checked by a `sync_debug=error` run (`torch.cuda.set_sync_debug_mode`) in `configs/exp/step1_pets.yaml`, which passed in step 1. That torch mode is a prototype that does not detect every synchronising op, so it is evidence rather than proof; the Nsight trace (no `cudaStreamSynchronize`/`cudaMemcpy` DtoH inside `plan`) is the second check. Syncs inside the simulator's `step()` (for example Isaac Lab's reset bookkeeping) are attributed to the `sim` phase, and are the same for every method.
 
 **Auto-reset masking:** Isaac Lab resets finished envs inside `step()`, so the returned `next_obs` of a done env is the post-reset observation. Model-based learners keep such transitions in the buffer with `valid=0`, and they are excluded from model training by loss weighting (no sync). PPO uses rsl_rl's standard handling (time-out bootstrapping as configured by Isaac Lab).
 
@@ -49,20 +49,22 @@ The question is when a learned model beats massively parallel simulation. This d
 | `env_steps_per_s` | env transitions per wall-clock second over the log interval, with everything included (sim, planning, learning) |
 | `model_rollouts_per_s` | model transitions (particle × horizon step) evaluated per second of planner time |
 | `planner_steps_per_s` | real-env actions produced per second of planner time (`num_envs` × plan calls / plan time) |
-| `reward_mean` | mean undiscounted return of training episodes that finished recently. PPO uses rsl_rl's last-100-episodes buffer; PETS uses the episodes completed during the log interval. Both come from the behaviour policy that actually collects the data. |
+| `reward_mean` | mean undiscounted return of the **last 100 finished training episodes**, for every method: rsl_rl's rewbuffer for PPO, an on-GPU ring in `GpuVecEnv` for model-based methods. Both come from the behaviour policy that actually collects the data. (Step-1 PETS runs, `step1_pets`, used the episodes finished within the log interval instead; they are superseded by `step1b_pets`.) |
 | **wall-clock to threshold** (headline) | `wall_s` at the first log row where `reward_mean ≥ τ_task` and the next row also satisfies it. `wall_s` starts after Isaac Sim boot, so boot is the same for all methods and is reported separately in `smoke.json`. It includes env creation. |
 | samples to threshold | `env_steps` at the same row |
 | GPU-hours per solved task | wall-clock to threshold / 3600 (1 GPU). Cost in $ = GPU-hours × the instance's $/hr from `run_meta.json`. |
-| time breakdown | per-phase GPU ms (CUDA events) and host ms (perf_counter) in every log row, plus Nsight NVTX breakdowns (§7) |
+| time breakdown | share of wall time per phase from the run's own timers (`host_ms`, figure `time_breakdown.png`), plus Nsight breakdowns (§7) for GPU busy time per phase |
 | memory | `torch.cuda.max_memory_allocated/reserved` per log interval (the simulator's own allocations are not included) |
 
 **Reward thresholds τ (FROZEN once filled in):** τ_task = 0.9 × the mean over the 5 evaluation seeds of PPO's final `reward_mean` (mean of the last 5 log rows), using the untuned reference config on the RTX 4090. Runs that never reach τ are reported as censored (> budget) and are not dropped.
 
 | task | PPO final reward (mean ± CI) | τ |
 |---|---|---|
-| cartpole | _fill from step1_ppo_ | _TBD_ |
-| ant | _fill from step1_ppo_ | _TBD_ |
-| anymal | _fill from step1_ppo_ | _TBD_ |
+| cartpole | 295.89 [295.72, 296.06] | **266.30** |
+| ant | 16,670.48 [16,074.10, 17,250.17] | **15,003.43** |
+| anymal | 25.94 [25.65, 26.23] | **23.35** |
+
+Frozen 2026-10-06 in `configs/thresholds.yaml` from `results/rtx4090/step1_ppo` (git `64de724`); reproduce with `python scripts/analyze.py results/rtx4090 --derive-thresholds`.
 
 ## 5. Tuning budget (the fairness rule)
 
@@ -108,7 +110,8 @@ bash scripts/profile.sh <name> algo=<a> task=<t> seed=0 profile.start=<i0> profi
 
 - The run records `--trace=cuda,nvtx,osrt --sample=none --cpuctxsw=none --capture-range=cudaProfilerApi`. The window is opened and closed from Python after warmup, so boot and JIT are excluded.
 - Windows: PPO uses iterations 20–50. PETS uses env iterations 150–350, after the first model fit.
-- Phases are NVTX ranges with the same names as the `gpu_ms` keys. `scripts/nsys_breakdown.py` turns `nvtx_sum` (host), `nvtx_gpu_proj_sum` (GPU) and `cuda_gpu_kern_sum` into `<name>.breakdown.json`, which is the input to the stacked-bar figure.
+- Phases are NVTX ranges with the same names as the `gpu_ms` keys. `scripts/nsys_breakdown.py` reads the exported `.sqlite` and reports, per phase, host time and **GPU busy time**: the summed duration of kernels/memcpy/memset whose launching runtime call happened while that phase was open (on any thread, so PhysX's worker-thread launches count as `sim`). nsys' own `nvtx_gpu_proj_sum` spans first-to-last GPU op and counts idle gaps, so it is kept only for reference. `_total.gpu_util` = union of device activity / capture window.
+- Tracing inflates host time for launch-heavy code (about 3x for naive PETS), so profiles are used for proportions and GPU-busy time, never for absolute wall-clock.
 - Profiles are taken from separate runs and are never mixed into the timing results, because profiler overhead would contaminate them.
 
 ## 8. Hardware protocol (Axis C)
@@ -122,3 +125,4 @@ bash scripts/profile.sh <name> algo=<a> task=<t> seed=0 profile.start=<i0> profi
 ## 9. Change log
 
 - v0.1: initial protocol (step 1).
+- v0.2 (2026-10-06): τ frozen; `reward_mean` unified to last-100 episodes for all methods; Nsight GPU-busy attribution; base image digest guard (`infra/gpus.yaml: image_digest`).

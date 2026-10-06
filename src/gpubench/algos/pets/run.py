@@ -124,7 +124,9 @@ def run(cfg: dict, logger, venv, env_cfg, timer):
         obs = next_obs
 
         # ---- log --------------------------------------------------------------------------------
-        if (it + 1) % log_every == 0 or it == total_iters - 1:
+        # log every `log_every`; the final partial interval only if it is a sizeable one
+        is_last = it == total_iters - 1
+        if (it + 1) % log_every == 0 or (is_last and it + 1 - last["it"] >= max(1, log_every // 4)):
             t = timer.flush()
             wall = logger.wall_s
             d_wall = max(wall - last["wall"], 1e-9)

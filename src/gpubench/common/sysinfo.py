@@ -7,7 +7,8 @@ import platform
 import subprocess
 from importlib import metadata
 
-PACKAGES = ["torch", "isaacsim", "isaaclab", "isaaclab_tasks", "isaaclab_rl", "rsl-rl-lib", "numpy", "gymnasium", "triton"]
+# isaaclab_tasks / isaaclab_rl / isaaclab_assets ship inside the `isaaclab` wheel (no separate dist metadata).
+PACKAGES = ["torch", "isaacsim", "isaaclab", "rsl-rl-lib", "numpy", "gymnasium", "triton"]
 
 
 def _run(cmd: list[str]) -> str | None:

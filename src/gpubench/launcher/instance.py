@@ -64,10 +64,44 @@ def gpu_spec(alias: str) -> dict:
     return {
         "alias": alias,
         "image": g.get("image", d["image"]),
+        "image_digest": g.get("image_digest", d.get("image_digest") if "image" not in g else None),
         "disk_gb": g.get("disk_gb", d["disk_gb"]),
         "query": f"{d['base_query']} {g['query']}",
         "env": {**d.get("env", {}), **g.get("env", {})},
     }
+
+
+def dockerhub_digest(image: str) -> str | None:
+    """Current registry digest of a Docker Hub `repo:tag` (None if it cannot be determined)."""
+    import json as _json
+    import urllib.request
+
+    repo, _, tag = image.partition(":")
+    if "/" not in repo or "." in repo.split("/")[0]:  # only Docker Hub `org/repo:tag` is supported here
+        return None
+    try:
+        tok_url = f"https://auth.docker.io/token?service=registry.docker.io&scope=repository:{repo}:pull"
+        token = _json.load(urllib.request.urlopen(tok_url, timeout=20))["token"]
+        req = urllib.request.Request(f"https://registry-1.docker.io/v2/{repo}/manifests/{tag or 'latest'}", method="HEAD", headers={
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.index.v1+json, "
+                      "application/vnd.docker.distribution.manifest.v2+json"})
+        return urllib.request.urlopen(req, timeout=20).headers.get("docker-content-digest")
+    except Exception:
+        return None
+
+
+def check_image(spec: dict, allow_drift: bool = False):
+    want = spec.get("image_digest")
+    if not want:
+        return
+    got = dockerhub_digest(spec["image"])
+    if got is None:
+        print(f"warning: could not verify digest of {spec['image']} (registry unreachable); launching by tag")
+    elif got != want and not allow_drift:
+        raise SystemExit(f"{spec['image']} now resolves to {got}, not the pinned {want}.\n"
+                         "The base image changed upstream: results would not be comparable across GPUs. Pin a new tag/digest "
+                         "in infra/gpus.yaml deliberately (and re-run the lock), or pass --allow-image-drift.")
 
 
 # ----------------------------------------------------------------------------------------------------
@@ -144,6 +178,7 @@ def create(alias: str, offer_id: int | None, git: dict, label: str | None = None
     if not token:
         raise SystemExit("GPUBENCH_GH_TOKEN not set (read-only fine-grained PAT for the repo; put it in .env)")
     spec = gpu_spec(alias)
+    check_image(spec, allow_drift=os.environ.get("GPUBENCH_ALLOW_IMAGE_DRIFT") == "1")
     if offer_id is None:
         offers = search(alias, limit=1)
         if not offers:
@@ -158,7 +193,7 @@ def create(alias: str, offer_id: int | None, git: dict, label: str | None = None
         "GIT_SHA": git["sha"],
         "GPUBENCH_GPU": alias,
         "GPUBENCH_OFFER_ID": str(offer["id"]),
-        "GPUBENCH_IMAGE": spec["image"],
+        "GPUBENCH_IMAGE": spec["image"] + (f"@{spec['image_digest']}" if spec.get("image_digest") else ""),
     }
     if offer.get("dph_total"):
         env["GPUBENCH_DPH"] = f"{offer['dph_total']:.4f}"
