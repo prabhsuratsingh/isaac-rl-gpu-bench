@@ -44,10 +44,15 @@ def expand(exp_path: str | Path) -> dict:
         matrix = entry["matrix"]
         keys = list(matrix)
         kind = entry.get("kind", "train")
-        for combo in itertools.product(*(matrix[k] if isinstance(matrix[k], list) else [matrix[k]] for k in keys)):
+        combos = list(itertools.product(*(matrix[k] if isinstance(matrix[k], list) else [matrix[k]] for k in keys)))
+        for combo in combos:
             params = dict(zip(keys, combo))
             ov = {"run.exp": name, **(entry.get("overrides") or {})}
-            run_id = entry.get("name") or "_".join(f"{params[k]}" if k != "seed" else f"s{params[k]}" for k in keys)
+            auto_id = "_".join(f"{params[k]}" if k != "seed" else f"s{params[k]}" for k in keys)
+            if entry.get("name"):  # a named entry with several combos still needs unique run ids
+                run_id = entry["name"] if len(combos) == 1 else f"{entry['name']}_s{params.get('seed', len(jobs))}"
+            else:
+                run_id = auto_id
             if kind == "profile":
                 run_id = f"prof_{run_id}"
             args = [f"{k}={_fmt(v)}" for k, v in params.items()] + [f"{k}={_fmt(v)}" for k, v in ov.items()]

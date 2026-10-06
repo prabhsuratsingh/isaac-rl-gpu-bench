@@ -1,4 +1,5 @@
 # PETS, naive plain-PyTorch implementation (Axis-D baseline). All on GPU, no host syncs in our code.
+# Task-specific settings (budgets, planner) live in configs/task/<task>.yaml -> algo_overrides.pets.
 name: pets
 impl: naive
 num_envs: 32                 # real Isaac Lab envs, all planned for in one batched MPPI call
@@ -8,6 +9,7 @@ train_every: 1000            # retrain the ensemble every N collected transition
 log_every: 1000
 buffer_capacity: 1000000
 clip_actions: 1.0
+max_wall_s: null             # wall-clock cap (tuning budget); the run stops at the first log row past it
 sync_debug: "off"            # off | warn | error  -> torch.cuda.set_sync_debug_mode around plan + buffer
 
 model:
@@ -18,7 +20,8 @@ model:
   weight_decay: 1.0e-5
   batch_size: 256            # per member
   first_train_steps: 2000
-  train_steps: 300
+  train_steps: 300           # gradient steps per retraining round ...
+  train_epochs_per_round: null   # ... or this many passes over the buffer instead (overrides train_steps)
 
 mppi:
   horizon: 25
@@ -27,3 +30,7 @@ mppi:
   iterations: 2
   temperature: 0.5           # in units of the per-env return std (scale-free)
   noise_std: 0.5
+  noise_decay: 1.0           # sigma multiplier per MPPI iteration within one plan()
+  noise_std_final: null      # anneal sigma linearly to this value ...
+  noise_anneal_steps: null   # ... over this many env steps
+  action_repeat: 1           # hold each planned action this many model steps (horizon must be divisible)

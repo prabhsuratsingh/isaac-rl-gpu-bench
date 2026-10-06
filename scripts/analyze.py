@@ -28,13 +28,16 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 SKIP_DIRS = {"analysis", "checks", "profiles", "sanity", "step1_profile"}
-PHASE_ORDER = ["sim", "plan", "model_train", "policy_update", "policy_act", "storage", "buffer", "random_act", "other"]
+PHASE_ORDER = ["sim", "plan", "model_train", "model_rollout", "policy_update", "policy_act", "storage", "buffer",
+               "random_act", "other"]
+LEARN_FRAC = 0.10  # "learns" (step-2 gate): CI lower bound > random return AND mean >= 10% of PPO's final return
 
 # Reference categorical palette (dataviz skill references/palette.md), fixed order, light mode.
 SERIES = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#4a3aa7", "#e34948"]
 SURFACE, INK, INK2, GRID = "#fcfcfb", "#0b0b0b", "#52514e", "#e4e3df"
 ALGO_COLOR = {"ppo": SERIES[0], "pets": SERIES[1], "mbpo": SERIES[2], "dreamer": SERIES[3]}
-PHASE_COLOR = {p: SERIES[i] for i, p in enumerate(["sim", "plan", "model_train", "policy_update", "policy_act"])}
+PHASE_COLOR = {p: SERIES[i] for i, p in enumerate(["sim", "plan", "model_train", "policy_update", "policy_act",
+                                                     "model_rollout"])}
 PHASE_COLOR["other"] = "#b5b3ad"
 
 
@@ -131,15 +134,53 @@ def run_table(runs, thresholds, gpu_dir: Path | None = None) -> pd.DataFrame:
     return pd.DataFrame(out)
 
 
-def summary_table(df: pd.DataFrame) -> pd.DataFrame:
+def random_reference(df: pd.DataFrame) -> dict:
+    """Mean final return of the uniform-random policy per task (algo=random runs), if present."""
+    r = df[df.algo == "random"]
+    return {t: float(g.final_reward.mean()) for t, g in r.groupby("task")}
+
+
+def summary_table(df: pd.DataFrame, thresholds: dict | None = None, random_ref: dict | None = None) -> pd.DataFrame:
     out = []
     for (task, algo, impl), g in df.groupby(["task", "algo", "impl"]):
         rec = {"task": task, "algo": algo, "impl": impl, "seeds": len(g), "solved": int(g.solved.sum())}
         for col in ["final_reward", "wall_to_tau_s", "steps_to_tau", "usd_to_tau", "env_steps_per_s"]:
             m, lo, hi = bootstrap_ci(g[col].tolist())
             rec[col], rec[col + "_lo"], rec[col + "_hi"] = m, lo, hi
+        ppo_final = ((thresholds or {}).get(task) or {}).get("ppo_final_mean")
+        rnd = (random_ref or {}).get(task)
+        rec["random_return"], rec["learn_bar"] = rnd, (LEARN_FRAC * ppo_final if ppo_final else None)
+        if algo != "random" and rnd is not None and ppo_final:
+            lo = rec["final_reward_lo"] if np.isfinite(rec["final_reward_lo"]) else rec["final_reward"]
+            rec["learns"] = bool(lo > rnd and rec["final_reward"] >= LEARN_FRAC * ppo_final)
+        else:
+            rec["learns"] = None
         out.append(rec)
     return pd.DataFrame(out)
+
+
+def gate_markdown(s: pd.DataFrame, easy: str = "cartpole", loco: str = "ant") -> str:
+    """Step-2 gate: all methods learn on the easy task; at least PPO and PETS learn on locomotion."""
+    def learns(task, algo):
+        r = s[(s.task == task) & (s.algo == algo)]
+        return None if r.empty else bool(r.learns.fillna(False).any())
+
+    lines = ["| task | method | final return | random | learn bar (10% PPO) | learns |", "|---|---|---|---|---|---|"]
+    for _, r in s[s.algo != "random"].iterrows():
+        lines.append(f"| {r.task} | {r.algo} ({r.impl}) | {_fmt(r.final_reward, r.final_reward_lo, r.final_reward_hi)} | "
+                     f"{'—' if r.random_return is None else f'{r.random_return:.3g}'} | "
+                     f"{'—' if r.learn_bar is None else f'{r.learn_bar:.3g}'} | "
+                     f"{'—' if r.learns is None else ('yes' if r.learns else 'no')} |")
+    easy_ok = all(learns(easy, m) for m in ("ppo", "pets", "mbpo"))
+    loco_ok = all(learns(loco, m) for m in ("ppo", "pets"))
+    mbpo_loco = learns(loco, "mbpo")
+    lines.append("")
+    lines.append(f"- all three learn on {easy}: **{'yes' if easy_ok else 'no'}**")
+    lines.append(f"- PPO and PETS learn on {loco}: **{'yes' if loco_ok else 'no'}**")
+    lines.append(f"- MBPO on {loco}: {'learns' if mbpo_loco else 'does not learn -> dropped on locomotion (gate rule)'}")
+    lines.append(f"\n**Gate: {'MET' if easy_ok and loco_ok else 'NOT MET'}** (learns = 95% CI lower bound of the final "
+                 f"return above the random policy's return, and mean >= {LEARN_FRAC:.0%} of PPO's final return)")
+    return "\n".join(lines)
 
 
 def _fmt(m, lo, hi, digits=3):
@@ -248,6 +289,8 @@ def plot_curves(runs, thresholds, out_dir: Path, gpu_label: str):
             for r in tr:
                 groups.setdefault((r["algo"], r["impl"]), []).append(r)
             for (algo, impl), rs in sorted(groups.items()):
+                if algo == "random":  # drawn as a reference line instead
+                    continue
                 color = ALGO_COLOR.get(algo, SERIES[4])
                 curves = []
                 for r in rs:
@@ -274,6 +317,11 @@ def plot_curves(runs, thresholds, out_dir: Path, gpu_label: str):
                 ax.axhline(tau, color=INK2, linestyle=(0, (4, 3)), linewidth=1)
                 ax.annotate(f"τ = {tau:g}", (0.01, tau), xycoords=("axes fraction", "data"), xytext=(0, 4),
                             textcoords="offset points", color=INK2, fontsize=9)
+            rnd = [final_reward(r["rows"]) for r in tr if r["algo"] == "random"]
+            if rnd:  # uniform-random policy: the floor of the "learns" criterion
+                ax.axhline(float(np.mean(rnd)), color=INK2, linestyle=(0, (1, 2)), linewidth=1)
+                ax.annotate("random", (0.99, float(np.mean(rnd))), xycoords=("axes fraction", "data"), xytext=(0, 4),
+                            textcoords="offset points", ha="right", color=INK2, fontsize=9)
             ax.set_xlabel(xlabel)
             ax.set_ylabel("episode return (recent episodes)")
         axes[0].set_title(f"{task}: reward vs wall-clock ({gpu_label})", loc="left")
@@ -288,6 +336,7 @@ def plot_curves(runs, thresholds, out_dir: Path, gpu_label: str):
 def plot_breakdown(df: pd.DataFrame, out_dir: Path, gpu_label: str):
     import matplotlib.pyplot as plt
 
+    df = df[df.algo != "random"]
     share_cols = [c for c in df.columns if c.startswith("share_")]
     g = df.groupby(["task", "algo", "impl"])[share_cols].mean().fillna(0.0)
     # phases under 3% everywhere (storage, buffer, random_act) fold into "other": one gray, not several
@@ -363,9 +412,13 @@ def main():
             print(f"WARNING: {task} mixes host CPUs {cpus}; wall-clock comparisons across them are confounded "
                   f"(launch-bound code is CPU-sensitive). Compare within one instance.", file=sys.stderr)
     df.to_csv(out_dir / f"runs{suffix}.csv", index=False)
-    s = summary_table(df)
+    s = summary_table(df, thresholds, random_reference(df))
     s.to_csv(out_dir / f"summary{suffix}.csv", index=False)
     md = summary_markdown(s)
+    if not suffix and s.learns.notna().any():
+        gate = gate_markdown(s)
+        (out_dir / "gate_step2.md").write_text(gate + "\n", encoding="utf-8")
+        print(gate + "\n")
     if suffix:
         md = f"Threshold: tau = {a.tau_frac:g} x PPO final return\n\n" + md
     (out_dir / f"summary{suffix}.md").write_text(md + "\n", encoding="utf-8")

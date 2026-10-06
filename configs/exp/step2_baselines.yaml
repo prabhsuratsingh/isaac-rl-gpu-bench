@@ -1,0 +1,9 @@
+# Step-2 baselines with DEFAULT (untuned) configs: PPO, PETS, MBPO x cartpole, ant x 3 seeds.
+# ~2.5 GPU-h on the EPYC 9684X RTX 4090 host. The tuned counterpart is step2_baselines_tuned.yaml.
+name: step2_baselines
+timeout_min: 60
+jobs:
+  - matrix:
+      algo: [ppo, pets_naive, mbpo_naive]
+      task: [cartpole, ant]
+      seed: [0, 1, 2]

@@ -32,6 +32,7 @@ class RunLogger:
         self.cfg = cfg
         run = cfg["run"]
         self.run_id = run.get("run_id") or f"{cfg['algo']['name']}_{cfg['task']['name']}_s{cfg['seed']}_{time.strftime('%Y%m%d-%H%M%S')}"
+        self.tuned = bool(cfg.get("tuned_from"))
         self.dir = Path(results_root) / run.get("exp", "adhoc") / self.run_id
         self.dir.mkdir(parents=True, exist_ok=True)
         self.t0 = time.perf_counter()
@@ -39,7 +40,7 @@ class RunLogger:
         self.common = {
             "run_id": self.run_id,
             "algo": cfg["algo"]["name"],
-            "impl": cfg["algo"].get("impl", "reference"),
+            "impl": cfg["algo"].get("impl", "reference") + ("+tuned" if cfg.get("tuned_from") else ""),
             "task": cfg["task"]["name"],
             "seed": cfg["seed"],
         }

@@ -28,7 +28,8 @@ def test_config_merge_and_overrides():
     cfg = load_config(["algo=pets_naive", "task=cartpole", "seed=3", "algo.mppi.horizon=7", "run.exp=x"])
     assert cfg["seed"] == 3 and cfg["run"]["exp"] == "x"
     assert cfg["algo"]["mppi"]["horizon"] == 7  # CLI beats task override
-    assert cfg["algo"]["num_envs"] == 32 and cfg["algo"]["total_env_steps"] == 20000  # task algo_overrides.pets
+    assert cfg["algo"]["num_envs"] == 32 and cfg["algo"]["total_env_steps"] == 40000  # task algo_overrides.pets
+    assert cfg["algo"]["mppi"]["noise_std_final"] == 0.15  # nested task override merged, defaults kept
     assert cfg["algo"]["mppi"]["samples"] == 400
     cfg = load_config(["algo=ppo", "task=ant"])
     assert cfg["task"]["gym_id"] == "Isaac-Ant-Direct-v0" and "algo_overrides" not in cfg["task"]
@@ -41,8 +42,12 @@ def test_exp_files_expand(exp):
     for j in spec["jobs"]:
         assert j["cmd"].startswith(("python ", "bash "))
         if "scripts/train.py" in j["cmd"] or "profile.sh" in j["cmd"]:
-            args = [a for a in j["cmd"].split() if "=" in a]
-            load_config([a.strip("'") for a in args])  # every expanded job resolves to a valid config
+            import shlex
+
+            args = [a for a in shlex.split(j["cmd"]) if "=" in a]
+            if "tuned=true" in args and not any((ROOT / "configs" / "tuned").glob("*.yaml")):
+                args.remove("tuned=true")  # tuned configs appear only after `tune.py report`
+            load_config(args)  # every expanded job resolves to a valid config
 
 
 def test_step1_ppo_matrix():

@@ -5,8 +5,19 @@ num_envs: 4096               # PPO default (Isaac Lab reference)
 sim_substep_mult: 1          # crossover knob: physics substeps per control step multiplier
 env_cfg_overrides: {}        # dotted DirectRLEnvCfg fields, e.g. {episode_length_s: 10.0}
 
+# Model-based defaults (step 2). Step-1 PETS used 20k steps and fixed sigma (see each run's config.json);
+# it plateaued at 85% of PPO with late episodes spanning 106-298, so sigma is now annealed and the budget
+# doubled. Sized to the 5-min Cartpole tuning cap (~80 ms/plan, ~2.2 s per model retraining round).
 algo_overrides:
   pets:
     num_envs: 32
-    total_env_steps: 20000
-    mppi: {horizon: 25, samples: 400, iterations: 2}
+    total_env_steps: 40000
+    train_every: 2000
+    mppi: {horizon: 25, samples: 400, iterations: 2, noise_std: 0.5, noise_decay: 0.6,
+           noise_std_final: 0.15, noise_anneal_steps: 25000}
+  mbpo:
+    num_envs: 32
+    total_env_steps: 40000
+    train_every: 2000
+    rollout_len: 1
+    utd: 1.0

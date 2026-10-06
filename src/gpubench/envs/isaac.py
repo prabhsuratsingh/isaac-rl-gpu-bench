@@ -147,7 +147,7 @@ class GpuVecEnv:
     def pop_episode_stats(self) -> dict:
         n = self._done_count.item()
         total = int(self._ep_total.item())
-        out = {"episodes": int(n), "episodes_total": total}
+        out = {"episodes": int(n), "episodes_total": total, "reward_window": self.window}
         if n > 0:
             out["reward_mean_interval"] = self._done_ret_sum.item() / n
         if total > 0:

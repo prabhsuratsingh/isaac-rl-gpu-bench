@@ -16,3 +16,4 @@ outputs/
 *.sqlite
 
 docs/paper/
+temp_res.md

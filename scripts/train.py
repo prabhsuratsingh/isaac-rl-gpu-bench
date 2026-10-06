@@ -18,9 +18,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))  # works wi
 
 from gpubench.common.config import dump, load_config  # noqa: E402
 
+GPU_VEC_ALGOS = ("pets", "mbpo", "random")
+
 
 def main(argv: list[str]) -> int:
     cfg = load_config(argv)
+    if cfg["run"].get("stop_at_tau"):  # tuning trials end once the frozen threshold is held (protocol section 5)
+        import yaml
+
+        th = yaml.safe_load((Path(__file__).resolve().parents[1] / "configs" / "thresholds.yaml").read_text())
+        cfg["algo"]["stop_tau"] = th[cfg["task"]["name"]]["tau"]
     print(dump(cfg), flush=True)
 
     # Isaac Sim must be up before any isaaclab.* import (other than isaaclab.app).
@@ -57,8 +64,10 @@ def main(argv: list[str]) -> int:
         if algo == "ppo":
             from gpubench.algos.ppo.run import run
             summary.update(run(cfg, logger, env, env_cfg, timer))
-        elif algo == "pets":
-            from gpubench.algos.pets.run import run
+        elif algo in GPU_VEC_ALGOS:  # model-based / reference methods on the torch-in/torch-out env view
+            import importlib
+
+            run = importlib.import_module(f"gpubench.algos.{algo}.run").run
             venv = GpuVecEnv(env, clip_actions=cfg["algo"].get("clip_actions", 1.0), window=cfg["algo"].get("reward_window"))
             summary["reward_window"] = venv.window
             summary.update(run(cfg, logger, venv, env_cfg, timer))

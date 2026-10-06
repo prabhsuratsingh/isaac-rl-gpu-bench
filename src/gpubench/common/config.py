@@ -85,8 +85,19 @@ def load_config(args: list[str] | dict, config_dir: Path = CONFIG_DIR) -> dict:
     cfg["algo"] = deep_merge(algo, per_task)
     cfg["algo"]["config_file"] = names["algo"]
     cfg["task"] = task
+    # tuned=true: apply the best trial of the equal-budget search (configs/tuned/<algo>_<task>.yaml,
+    # written by scripts/tune.py report) after the task defaults and before CLI overrides.
+    tuned = dict(pairs).get("tuned")
+    if tuned:
+        tf = config_dir / "tuned" / f"{names['algo']}_{names['task']}.yaml"
+        if not tf.exists():
+            raise FileNotFoundError(f"tuned=true but {tf} does not exist (run scripts/tune.py report first)")
+        spec = yaml.safe_load(tf.read_text()) or {}
+        for k, v in (spec.get("overrides") or {}).items():
+            _set_dotted(cfg, k, v)
+        cfg["tuned_from"] = {"file": tf.name, "trial": spec.get("trial"), "objective": spec.get("objective")}
     for k, v in pairs:
-        if k not in ("algo", "task"):
+        if k not in ("algo", "task", "tuned"):
             _set_dotted(cfg, k, v)
     return cfg
 

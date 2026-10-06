@@ -1,0 +1,10 @@
+# The equal tuning budget (protocol section 5), identical for every method.
+trials: 8                    # per (method, task); trial 0 is always the untuned default config
+seed: 100                    # tuning seed (never used for reported numbers)
+sampler_seed: 2026           # seeds the random search itself
+max_wall_s:                  # per-trial wall-clock cap (the run stops at the first log row past it)
+  cartpole: 300
+  ant: 1200
+stop_at_tau: true            # a trial ends as soon as it holds tau (saves budget, objective unchanged)
+methods: [ppo, pets, mbpo]
+tasks: [cartpole, ant]

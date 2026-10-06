@@ -14,16 +14,22 @@ class GpuReplayBuffer:
         self.next_obs = torch.zeros(self.capacity, obs_dim, device=device)
         # 1.0 where next_obs is the true successor (not an auto-reset observation)
         self.valid = torch.zeros(self.capacity, device=device)
+        # 1.0 where the episode truly terminated (not a time-out). A terminated transition is usable for TD
+        # learning even though its next_obs is a post-reset observation: the target never reads it.
+        self.term = torch.zeros(self.capacity, device=device)
+        self.rew = torch.zeros(self.capacity, device=device)  # used by MBPO's SAC; PETS recomputes rewards
         self.ptr = 0  # host-side bookkeeping only; never read back from the device
         self.size = 0
 
-    def add(self, obs, act, next_obs, valid):
+    def add(self, obs, act, next_obs, valid, term=None, rew=None):
         n = obs.shape[0]
         idx = (self.ptr + torch.arange(n, device=self.device)) % self.capacity
         self.obs[idx] = obs
         self.act[idx] = act
         self.next_obs[idx] = next_obs
         self.valid[idx] = valid.to(self.valid.dtype)
+        self.term[idx] = 0.0 if term is None else term.to(self.term.dtype)
+        self.rew[idx] = 0.0 if rew is None else rew.to(self.rew.dtype)
         self.ptr = (self.ptr + n) % self.capacity
         self.size = min(self.size + n, self.capacity)
         return idx
@@ -38,6 +44,10 @@ class GpuReplayBuffer:
 
     def get(self, idx):
         return self.obs[idx], self.act[idx], self.next_obs[idx], self.valid[idx]
+
+    def get_batch(self, idx) -> dict:
+        return {"obs": self.obs[idx], "act": self.act[idx], "next_obs": self.next_obs[idx], "valid": self.valid[idx],
+                "term": self.term[idx], "rew": self.rew[idx]}
 
     def all(self):
         s = slice(0, self.size)

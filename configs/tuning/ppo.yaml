@@ -1,0 +1,13 @@
+# Equal-budget tuning space for PPO (protocol section 5). Declared before any tuning run; do not widen
+# after seeing results. 6 sampled dimensions, like PETS and MBPO.
+algo_file: ppo
+space:
+  algo.num_envs: {choice: [1024, 2048, 4096, 8192]}
+  algo.agent_overrides.algorithm.learning_rate: {loguniform: [1.0e-4, 3.0e-3]}
+  algo.agent_overrides.num_steps_per_env: {choice: [8, 16, 24, 32]}
+  algo.agent_overrides.algorithm.num_mini_batches: {choice: [2, 4, 8]}
+  algo.agent_overrides.algorithm.num_learning_epochs: {choice: [3, 5, 8]}
+  algo.agent_overrides.algorithm.entropy_coef: {loguniform: [1.0e-4, 1.0e-2]}
+fixed:
+  cartpole: {algo.max_iterations: 2000}   # the wall cap / stop-at-tau end the run, not the iteration count
+  ant: {algo.max_iterations: 6000}

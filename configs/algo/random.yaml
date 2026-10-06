@@ -1,0 +1,9 @@
+# Uniform-random policy: reference for "learns" (beats random) in the step-2 gate.
+name: random
+impl: reference
+num_envs: 256
+reward_window: 256          # average over all of the last 256 finished episodes
+min_episodes: 256
+min_env_steps: 20000
+log_every_iters: 20
+clip_actions: 1.0

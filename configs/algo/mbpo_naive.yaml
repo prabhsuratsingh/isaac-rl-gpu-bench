@@ -1,0 +1,41 @@
+# MBPO, naive plain-PyTorch implementation: SAC on branched model rollouts, everything on the GPU.
+# Shares the ensemble, its training routine and the known reward/termination functions with PETS.
+name: mbpo
+impl: naive
+num_envs: 32
+total_env_steps: 40000
+seed_steps: 2000
+train_every: 1000            # retrain the ensemble every N real transitions
+rollout_every: 1000          # branch new model rollouts every N real transitions
+rollout_batch: 25000         # start states per rollout round
+rollout_len: 1               # int, or MBPO's linear schedule [k0, k1, env_step0, env_step1]
+model_retain_rounds: 5       # model buffer keeps this many rounds of rollouts
+utd: 1.0                     # SAC updates per real transition (round(utd * num_envs) per vector step)
+real_ratio: 0.05             # fraction of each SAC batch drawn from real data
+log_every: 1000
+buffer_capacity: 1000000
+clip_actions: 1.0
+max_wall_s: null
+sync_debug: "off"
+
+model:                       # identical defaults to PETS (same class, same training routine)
+  ensemble_size: 5
+  hidden: 200
+  layers: 4
+  lr: 1.0e-3
+  weight_decay: 1.0e-5
+  batch_size: 256
+  first_train_steps: 2000
+  train_steps: 300
+  train_epochs_per_round: null
+
+sac:
+  hidden: 256
+  layers: 2
+  actor_lr: 3.0e-4
+  critic_lr: 3.0e-4
+  alpha_lr: 3.0e-4
+  gamma: 0.99
+  tau: 0.005
+  init_alpha: 0.1
+  batch_size: 256

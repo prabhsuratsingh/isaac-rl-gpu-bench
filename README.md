@@ -52,6 +52,25 @@ Other useful commands:
 - `gpubench-vast logs --bootstrap` or `logs --job step1_ppo/ppo_ant_s0` shows the bootstrap log or one job's log.
 - `gpubench-vast ssh` opens a shell on the instance.
 
+## Step 2: PETS, MBPO, equal tuning budget, 3-seed baselines
+
+```powershell
+# all on one EPYC 9684X RTX 4090 host (one comparison = one host)
+gpubench-vast exp rtx4090 configs/exp/step2_smoke.yaml --cpu "EPYC 9684X" --max-hours 1
+gpubench-vast exp rtx4090 configs/exp/tune_ppo_cartpole.yaml configs/exp/tune_pets_cartpole.yaml configs/exp/tune_mbpo_cartpole.yaml `
+    configs/exp/tune_ppo_ant.yaml configs/exp/tune_pets_ant.yaml configs/exp/tune_mbpo_ant.yaml `
+    configs/exp/step2_baselines.yaml --cpu "EPYC 9684X" --max-hours 14
+python scripts/tune.py report results/rtx4090 --paper step2     # -> configs/tuned/*.yaml + tuning budget table
+git add configs/tuned; git commit -m "Tuned configs (step 2)"; git push
+gpubench-vast exp rtx4090 configs/exp/step2_baselines_tuned.yaml --cpu "EPYC 9684X" --max-hours 4
+python scripts/analyze.py results/rtx4090 --exps step2_random step2_baselines step2_baselines_tuned --paper step2
+```
+
+How it works:
+- The tuning search spaces in `configs/tuning/` are fixed before any trial runs.
+- `scripts/tune.py generate` regenerates `configs/exp/tune_*.yaml` from them.
+- The gate verdict is written to `results/rtx4090/analysis/gate_step2.md`.
+
 ## Running a single job on an instance
 
 ```bash

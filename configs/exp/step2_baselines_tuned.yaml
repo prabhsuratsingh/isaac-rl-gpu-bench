@@ -1,0 +1,10 @@
+# Step-2 baselines with TUNED configs (best trial of the equal budget, configs/tuned/*.yaml).
+# Requires `python scripts/tune.py report results/<gpu>` to have been run and committed first.
+name: step2_baselines_tuned
+timeout_min: 60
+jobs:
+  - matrix:
+      algo: [ppo, pets_naive, mbpo_naive]
+      task: [cartpole, ant]
+      seed: [0, 1, 2]
+    overrides: {tuned: true}

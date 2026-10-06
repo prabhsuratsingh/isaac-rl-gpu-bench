@@ -1,0 +1,30 @@
+# Step-2 smoke test (~15-20 min): every new code path on the real simulator, short budgets.
+# Also produces the random-policy reference returns used by the "learns" gate (3 seeds x 2 tasks).
+name: step2_smoke
+timeout_min: 30
+jobs:
+  - name: random_cartpole
+    matrix: {algo: [random], task: [cartpole], seed: [0, 1, 2]}
+    overrides: {run.exp: step2_random}
+  - name: random_ant
+    matrix: {algo: [random], task: [ant], seed: [0, 1, 2]}
+    overrides: {run.exp: step2_random}
+  - name: smoke_ppo_cartpole_cap
+    matrix: {algo: [ppo], task: [cartpole], seed: [0]}
+    overrides: {algo.max_wall_s: 15}                         # exercises the wall-clock cap path in rsl_rl
+  - name: smoke_ppo_ant
+    matrix: {algo: [ppo], task: [ant], seed: [0]}
+    overrides: {algo.max_iterations: 20}
+  - name: smoke_pets_cartpole_sync
+    matrix: {algo: [pets_naive], task: [cartpole], seed: [0]}
+    overrides: {algo.total_env_steps: 6000, algo.sync_debug: error}
+  - name: smoke_pets_ant
+    matrix: {algo: [pets_naive], task: [ant], seed: [0]}
+    overrides: {algo.total_env_steps: 8000, algo.seed_steps: 2000, algo.train_every: 4000, algo.log_every: 2000}
+  - name: smoke_mbpo_cartpole_sync
+    matrix: {algo: [mbpo_naive], task: [cartpole], seed: [0]}
+    overrides: {algo.total_env_steps: 6000, algo.sync_debug: error}
+  - name: smoke_mbpo_ant
+    matrix: {algo: [mbpo_naive], task: [ant], seed: [0]}
+    overrides: {algo.total_env_steps: 8000, algo.seed_steps: 2000, algo.train_every: 4000, algo.log_every: 2000,
+                algo.rollout_len: 3}

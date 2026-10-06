@@ -1,0 +1,11 @@
+# Equal-budget tuning space for naive PETS (protocol section 5). 6 sampled dimensions.
+# Every horizon is divisible by every action_repeat; samples are multiples of the ensemble size (5).
+algo_file: pets_naive
+space:
+  algo.mppi.horizon: {choice: [12, 18, 24, 30, 36]}
+  algo.mppi.action_repeat: {choice: [1, 2, 3]}
+  algo.mppi.samples: {choice: [200, 400, 800]}
+  algo.mppi.noise_std: {loguniform: [0.2, 0.8]}
+  algo.mppi.noise_decay: {uniform: [0.4, 1.0]}
+  algo.model.train_steps: {choice: [150, 300, 600]}
+fixed: {}

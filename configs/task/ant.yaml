@@ -6,12 +6,26 @@ num_envs: 4096
 sim_substep_mult: 1
 env_cfg_overrides: {}
 
+# Model-based defaults (step 2). Step-1 runs used the earlier values recorded in each run's config.json
+# (PETS: 200k steps, horizon 20, 500 samples, no action repeat).
+# Budgets are sized to the 20-min Ant tuning cap at naive speed (~100 ms/plan, ~8 ms/model grad step).
 algo_overrides:
   pets:
     num_envs: 32
-    total_env_steps: 200000
-    train_every: 5000
+    total_env_steps: 300000
+    train_every: 10000
     log_every: 5000
     seed_steps: 10000
     model: {hidden: 256, train_steps: 500, first_train_steps: 3000}
-    mppi: {horizon: 20, samples: 500, iterations: 2, noise_std: 0.4}
+    # action_repeat 3: 8 decisions over a 24-step (0.4 s) horizon -> 64 search dims instead of 160
+    mppi: {horizon: 24, samples: 400, iterations: 2, noise_std: 0.5, noise_decay: 0.6, action_repeat: 3}
+  mbpo:
+    num_envs: 32
+    total_env_steps: 300000
+    seed_steps: 10000
+    train_every: 10000
+    rollout_every: 1000
+    rollout_len: [1, 10, 20000, 150000]
+    utd: 0.5
+    log_every: 5000
+    model: {hidden: 256, train_steps: 500, first_train_steps: 3000}

@@ -28,7 +28,9 @@ The question is when a learned model beats massively parallel simulation. This d
 | PPO | `reference`: rsl_rl `OnPolicyRunner` with Isaac Lab's shipped agent config | 4096 envs by default; the 512→8192 sweep comes later |
 | PETS | `naive`: plain PyTorch, a Python loop over ensemble members and horizon, fp32 | Axis-D baseline |
 | PETS | `fused` (later): batched ensemble, fused sampling/cost, CUDA graphs, bf16 | one optimisation at a time |
-| MBPO, Dreamer | later steps | |
+| MBPO | `naive`: SAC (2×256, auto-entropy) trained on 5% real + 95% branched model data. It uses PETS's ensemble, training routine and known reward/termination functions (the model learns dynamics only). TS-1 rollouts; GPU replay for real and model data. | step 2 |
+| random | uniform actions; the floor of the "learns" criterion | step 2 |
+| Dreamer | later steps (nice-to-have) | |
 
 **GPU-native requirement:** in our own code, planning, model inference, model training and replay run entirely on the GPU. No `.cpu()`, `.item()` or boolean-mask indexing happens inside the act loop. This is checked by a `sync_debug=error` run (`torch.cuda.set_sync_debug_mode`) in `configs/exp/step1_pets.yaml`, which passed in step 1. That torch mode is a prototype that does not detect every synchronising op, so it is evidence rather than proof; the Nsight trace (no `cudaStreamSynchronize`/`cudaMemcpy` DtoH inside `plan`) is the second check. Syncs inside the simulator's `step()` (for example Isaac Lab's reset bookkeeping) are attributed to the `sim` phase, and are the same for every method.
 
@@ -58,6 +60,8 @@ The question is when a learned model beats massively parallel simulation. This d
 
 **Reward thresholds τ (FROZEN once filled in):** τ_task = 0.9 × the mean over the 5 evaluation seeds of PPO's final `reward_mean` (mean of the last 5 log rows), using the untuned reference config on the RTX 4090. Runs that never reach τ are reported as censored (> budget) and are not dropped.
 
+**"Learns" (development gates, step 2 on):** a (method, task) learns if the 95% bootstrap CI lower bound of its final return is above the uniform-random policy's return (`algo=random`, ≥256 episodes, 3 seeds; `results/<gpu>/step2_random`), **and** its mean final return is at least 10% of PPO's final return (cartpole ≥ 29.6, ant ≥ 1,667). This criterion only gates development. τ-based wall-clock stays the headline metric, and the gap to τ is always reported.
+
 | task | PPO final reward (mean ± CI) | τ |
 |---|---|---|
 | cartpole | 295.89 [295.72, 296.06] | **266.30** |
@@ -70,10 +74,15 @@ Frozen 2026-10-06 in `configs/thresholds.yaml` from `results/rtx4090/step1_ppo` 
 
 Every method gets the same hyperparameter search budget per task:
 
-- **Search:** random search (Optuna `RandomSampler`) with **20 trials** per (method, task) on the tuning seeds, with a 1-hour wall-clock cap per trial on the RTX 4090.
-- **Objective:** the median over the tuning seeds of wall-clock to threshold. Censored trials score the cap.
+- **Search:** seeded random search (`scripts/tune.py`, no external dependency). The budget is in `configs/tuning/budget.yaml` and is identical for every method.
+  - **Step 2 (small budget):** 8 trials per (method, task), 1 tuning seed (100), with per-trial wall-clock caps of 300 s (cartpole) and 1200 s (ant).
+  - **Later (full budget):** 20 trials × 3 tuning seeds.
+  - Trial 0 is always the untuned default.
+  - Trials stop as soon as they hold τ (`run.stop_at_tau`), which saves budget without changing the objective.
+- **Objective (lower is better):** wall-clock seconds until the run holds τ. A trial that never does scores `cap × (2 − clip(final/τ, 0, 1))`, so it ranks behind every solved trial but still by how close it got.
 - **Search spaces:** declared in `configs/tuning/<method>.yaml` before any tuning run, with a similar number of dimensions for every method (about 6). PPO's space includes `num_envs`, learning rate, `num_steps_per_env`, epochs, minibatches and entropy coefficient.
-- **Accounting:** the GPU-hours spent tuning are logged per method and reported alongside the results.
+- **Accounting:** the GPU-hours and dollars spent tuning are logged per method and task (`results/<gpu>/analysis/tuning_budget.{md,tex}`) and reported alongside the results.
+- **Use:** the best trial becomes `configs/tuned/<algo>_<task>.yaml` and is applied with `tuned=true` (run label `impl+tuned`).
 - **Order of reporting:** the untuned reference numbers (Isaac Lab defaults for PPO, the literature defaults in `configs/algo/*.yaml` for model-based methods) are reported *in addition to* the tuned ones.
 
 ## 6. Logging format
@@ -87,7 +96,7 @@ Each run writes `results/<exp>/<run_id>/`, and the launcher pulls it to `results
   - `vast`: GPU alias, offer id, $/hr, image
 - `config.json`: the fully resolved config.
 - `agent_cfg.json`: the resolved rsl_rl agent config (PPO only).
-- `metrics.jsonl`: one row per log interval.
+- `metrics.jsonl`: one row per log interval. Every algorithm writes it through the shared `gpubench.common.reporter.Reporter`, so the common keys are identical by construction and checked by a test. Algorithm-specific values are prefixed `<algo>/` (e.g. `pets/model_holdout_mse`, `mbpo/q_loss`); the step-1 files use the unprefixed names.
   ```json
   {"run_id", "algo", "impl", "task", "seed", "wall_s", "iteration", "env_steps",
    "env_steps_per_s", "model_rollouts_per_s", "planner_steps_per_s",
@@ -127,5 +136,6 @@ bash scripts/profile.sh <name> algo=<a> task=<t> seed=0 profile.start=<i0> profi
 ## 9. Change log
 
 - v0.1: initial protocol (step 1).
+- v0.4 (2026-10-07): "learns" criterion; equal-budget tuning procedure (seeded random search, objective, stop-at-τ, accounting); shared Reporter schema; MBPO and random baseline added.
 - v0.3 (2026-10-06): reward window = min(100, num_envs); one comparison = one host (CPU recorded, `--cpu` filter); cross-host reproducibility measured.
 - v0.2 (2026-10-06): τ frozen; `reward_mean` unified to last-100 episodes for all methods; Nsight GPU-busy attribution; base image digest guard (`infra/gpus.yaml: image_digest`).
