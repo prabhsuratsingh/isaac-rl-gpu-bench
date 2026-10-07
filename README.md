@@ -57,7 +57,7 @@ Other useful commands:
 ```powershell
 # all on one EPYC 9684X RTX 4090 host (one comparison = one host)
 gpubench-vast exp rtx4090 configs/exp/step2_smoke.yaml --cpu "EPYC 9684X" --max-hours 1
-gpubench-vast exp rtx4090 configs/exp/tune_ppo_cartpole.yaml configs/exp/tune_pets_cartpole.yaml configs/exp/tune_mbpo_cartpole.yaml `
+gpubench-vast exp rtx4090 configs/exp/step2_recheck.yaml configs/exp/tune_ppo_cartpole.yaml configs/exp/tune_pets_cartpole.yaml configs/exp/tune_mbpo_cartpole.yaml `
     configs/exp/tune_ppo_ant.yaml configs/exp/tune_pets_ant.yaml configs/exp/tune_mbpo_ant.yaml `
     configs/exp/step2_baselines.yaml --cpu "EPYC 9684X" --max-hours 14
 python scripts/tune.py report results/rtx4090 --paper step2     # -> configs/tuned/*.yaml + tuning budget table

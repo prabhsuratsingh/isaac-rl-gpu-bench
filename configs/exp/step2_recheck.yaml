@@ -1,0 +1,9 @@
+# Re-run of the one step-2 smoke job that failed: PETS under sync_debug=error. The buffer wrote a Python
+# scalar into a CUDA tensor (an implicit host->device copy, i.e. a sync); fixed with index_fill_.
+# Runs first in the long step-2 session so it costs no extra instance boot.
+name: step2_recheck
+timeout_min: 15
+jobs:
+  - name: smoke_pets_cartpole_sync
+    matrix: {algo: [pets_naive], task: [cartpole], seed: [0]}
+    overrides: {algo.total_env_steps: 6000, algo.sync_debug: error, run.exp: step2_smoke}

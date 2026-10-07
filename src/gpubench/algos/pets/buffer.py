@@ -28,8 +28,16 @@ class GpuReplayBuffer:
         self.act[idx] = act
         self.next_obs[idx] = next_obs
         self.valid[idx] = valid.to(self.valid.dtype)
-        self.term[idx] = 0.0 if term is None else term.to(self.term.dtype)
-        self.rew[idx] = 0.0 if rew is None else rew.to(self.rew.dtype)
+        # Optional fields: index_fill_ takes the scalar as a kernel argument. `self.rew[idx] = 0.0` would wrap
+        # 0.0 in a CPU tensor and copy it host->device, which is a sync (caught by sync_debug=error in step 2).
+        if term is None:
+            self.term.index_fill_(0, idx, 0.0)
+        else:
+            self.term[idx] = term.to(self.term.dtype)
+        if rew is None:
+            self.rew.index_fill_(0, idx, 0.0)
+        else:
+            self.rew[idx] = rew.to(self.rew.dtype)
         self.ptr = (self.ptr + n) % self.capacity
         self.size = min(self.size + n, self.capacity)
         return idx
