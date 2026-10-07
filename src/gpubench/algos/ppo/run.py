@@ -85,6 +85,10 @@ def run(cfg: dict, logger, env, env_cfg, timer):
     _apply_overrides(agent_cfg, a.get("agent_overrides"))
     if a.get("max_iterations"):
         agent_cfg.max_iterations = int(a["max_iterations"])
+    if not a.get("save_checkpoints", False):
+        # rsl_rl saves model_<it>.pt every save_interval iterations (1.6 GB over the step-2 Ant tuning);
+        # the benchmark never reloads them. The final model is still saved when learn() completes.
+        agent_cfg.save_interval = 10**9
     prof = ProfilerWindow(cfg["profile"]["start"], cfg["profile"]["length"])
     if prof.start is not None:  # profile runs only need the window
         agent_cfg.max_iterations = prof.stop + 1

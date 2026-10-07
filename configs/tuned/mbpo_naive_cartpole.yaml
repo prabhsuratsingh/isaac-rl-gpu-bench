@@ -1,0 +1,7 @@
+method: mbpo
+task: cartpole
+trial: trial_00
+objective: 155.04
+solved: true
+reward: 267.71173095703125
+overrides: {}

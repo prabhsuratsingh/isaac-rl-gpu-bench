@@ -1,0 +1,13 @@
+method: ppo
+task: cartpole
+trial: trial_05
+objective: 10.18
+solved: true
+reward: 271.37349922180175
+overrides:
+  algo.num_envs: 4096
+  algo.agent_overrides.algorithm.learning_rate: 0.000564
+  algo.agent_overrides.num_steps_per_env: 8
+  algo.agent_overrides.algorithm.num_mini_batches: 2
+  algo.agent_overrides.algorithm.num_learning_epochs: 5
+  algo.agent_overrides.algorithm.entropy_coef: 0.00832

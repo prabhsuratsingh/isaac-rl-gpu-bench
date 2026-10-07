@@ -332,7 +332,9 @@ def cmd_logs(a):
 def _pull(inst_id: int, inst: dict, rem: Remote) -> Path:
     alias = _gpu_alias(inst_id, inst)
     dest = RESULTS / alias
-    got = rem.pull_dir(f"{REMOTE_REPO}/results", dest)
+    # model checkpoints (*.pt) stay on the instance unless GPUBENCH_PULL_CHECKPOINTS=1
+    excl = () if os.environ.get("GPUBENCH_PULL_CHECKPOINTS") == "1" else ("*.pt",)
+    got = rem.pull_dir(f"{REMOTE_REPO}/results", dest, exclude=excl)
     rem.pull_dir("/workspace/logs", dest / "_logs" / str(inst_id))
     for f in ("smoke.json", "bootstrap.log"):
         rem.pull_file(f"/workspace/{f}", dest / "_instance" / str(inst_id) / f)

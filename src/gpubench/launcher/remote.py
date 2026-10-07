@@ -84,14 +84,19 @@ class Remote:
         d = os.path.dirname(remote_path)
         self.run(f"mkdir -p {shlex.quote(d)} && cat > {shlex.quote(remote_path)}", input=content, cwd=None)
 
-    def pull_dir(self, remote_dir: str, local_dir: Path, timeout: float = 3600) -> bool:
-        """tar the remote dir over ssh and extract locally. Returns False if the remote dir doesn't exist."""
+    def pull_dir(self, remote_dir: str, local_dir: Path, timeout: float = 3600, exclude: tuple[str, ...] = ("*.pt",)) -> bool:
+        """tar the remote dir over ssh and extract locally. Returns False if the remote dir doesn't exist.
+
+        `exclude`: tar patterns left behind. Model checkpoints (*.pt) are skipped by default; in step 2 they
+        were 1.6 GB of a 1.7 GB results dir and are not used by any analysis.
+        """
         if not self.ok(f"test -d {shlex.quote(remote_dir)}"):
             return False
         local_dir.mkdir(parents=True, exist_ok=True)
+        excl = " ".join(f"--exclude={shlex.quote(p)}" for p in exclude)
         with tempfile.NamedTemporaryFile(suffix=".tgz", delete=False) as tmp:
             tmp_path = tmp.name
-            p = subprocess.run(self.base_cmd() + [self.wrap(f"tar -C {shlex.quote(remote_dir)} -czf - .", cwd=None)],
+            p = subprocess.run(self.base_cmd() + [self.wrap(f"tar -C {shlex.quote(remote_dir)} {excl} -czf - .", cwd=None)],
                                stdout=tmp, stderr=subprocess.PIPE, timeout=timeout)
         try:
             if p.returncode != 0:

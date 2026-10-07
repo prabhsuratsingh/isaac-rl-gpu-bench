@@ -1,0 +1,13 @@
+method: pets
+task: cartpole
+trial: trial_02
+objective: 59.33
+solved: true
+reward: 267.2630920410156
+overrides:
+  algo.mppi.horizon: 36
+  algo.mppi.action_repeat: 3
+  algo.mppi.samples: 200
+  algo.mppi.noise_std: 0.264
+  algo.mppi.noise_decay: 0.8591
+  algo.model.train_steps: 300
