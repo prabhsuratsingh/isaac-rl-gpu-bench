@@ -1,9 +1,10 @@
 method: mbpo
 task: ant
 trial: trial_02
-objective: 2042.96
+round: tune_r2_mbpo_ant
+objective: 2047.16
 solved: false
-reward: 4463.97333984375
+reward: 4411.54931640625
 overrides:
   algo.utd: 2.0
   algo.real_ratio: 0.5

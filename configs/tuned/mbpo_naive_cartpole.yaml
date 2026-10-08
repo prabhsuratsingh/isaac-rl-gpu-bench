@@ -1,7 +1,15 @@
 method: mbpo
 task: cartpole
-trial: trial_00
-objective: 155.04
+trial: trial_05
+round: tune_r2_mbpo_cartpole
+objective: 127.91
 solved: true
-reward: 267.71173095703125
-overrides: {}
+reward: 275.8486633300781
+overrides:
+  algo.utd: 0.25
+  algo.real_ratio: 0.25
+  algo.rollout_batch: 25000
+  algo.sac.critic_lr: 0.0008
+  algo.sac.actor_lr: 0.0008
+  algo.model.train_steps: 150
+  algo.rollout_len: 5

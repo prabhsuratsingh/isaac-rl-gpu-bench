@@ -1,13 +1,14 @@
 method: pets
 task: ant
-trial: trial_03
-objective: 2328.16
+trial: trial_06
+round: tune_r2_pets_ant
+objective: 2315.0
 solved: false
-reward: 898.2392211914063
+reward: 1062.79345703125
 overrides:
   algo.mppi.horizon: 12
   algo.mppi.action_repeat: 1
-  algo.mppi.samples: 200
-  algo.mppi.noise_std: 0.252
-  algo.mppi.noise_decay: 0.7991
-  algo.model.train_steps: 150
+  algo.mppi.samples: 800
+  algo.mppi.noise_std: 0.43
+  algo.mppi.noise_decay: 0.9431
+  algo.model.train_steps: 600

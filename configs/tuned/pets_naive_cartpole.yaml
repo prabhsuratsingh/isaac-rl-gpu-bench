@@ -1,7 +1,8 @@
 method: pets
 task: cartpole
 trial: trial_02
-objective: 59.33
+round: tune_r2_pets_cartpole
+objective: 64.77
 solved: true
 reward: 267.2630920410156
 overrides:

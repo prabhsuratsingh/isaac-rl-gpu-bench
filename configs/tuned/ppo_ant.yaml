@@ -1,10 +1,12 @@
 method: ppo
 task: ant
 trial: trial_03
+round: tune_ppo_ant
 objective: 153.07
 solved: true
 reward: 15135.046303710937
 overrides:
+  algo.max_iterations: 6000
   algo.num_envs: 4096
   algo.agent_overrides.algorithm.learning_rate: 0.00243
   algo.agent_overrides.num_steps_per_env: 8
