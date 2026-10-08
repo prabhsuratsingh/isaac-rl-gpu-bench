@@ -188,3 +188,89 @@ def test_runner_end_to_end_schema(algo, ov, tmp_path):
         missing = set(COMMON_KEYS) - set(r)
         assert not missing, missing
     assert rows[-1]["reward_mean"] is not None
+
+
+# ---------------------------------------------------------------------------------------------- step 2b
+def _tune_module():
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("tune", ROOT / "scripts" / "tune.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_round2_generation_is_wall_clock_only_and_same_configs():
+    import yaml
+
+    for m in ("pets", "mbpo"):
+        for t in ("cartpole", "ant"):
+            r1 = yaml.safe_load((ROOT / "configs" / "exp" / f"tune_{m}_{t}.yaml").read_text())
+            r2 = yaml.safe_load((ROOT / "configs" / "exp" / f"tune_r2_{m}_{t}.yaml").read_text())
+            assert [j["overrides"] for j in r1["jobs"]] == [j["overrides"] for j in r2["jobs"]]
+            assert all("algo.total_env_steps=100000000" in j["cmd"] and "algo.max_wall_s=" in j["cmd"] for j in r2["jobs"])
+            assert all(f"run.exp=tune_r2_{m}_{t}" in j["cmd"] for j in r2["jobs"])
+
+
+def _fake_trial(root: Path, exp: str, name: str, curve, wall_per_row=10.0, cost=0.01):
+    d = root / exp / name
+    d.mkdir(parents=True)
+    with open(d / "metrics.jsonl", "w") as f:
+        for i, r in enumerate(curve):
+            f.write(json.dumps({"wall_s": (i + 1) * wall_per_row, "reward_mean": r, "env_steps": (i + 1) * 100}) + "\n")
+    (d / "summary.json").write_text(json.dumps({"wall_s": len(curve) * wall_per_row, "cost_usd": cost}))
+
+
+def test_tune_report_prefers_newest_round_and_counts_all_spend(tmp_path):
+    tune = _tune_module()
+    gpu = tmp_path / "gpu"
+    for i in range(8):  # round 1: never solves; round 2: trial 5 solves fastest
+        _fake_trial(gpu, "tune_pets_cartpole", f"trial_{i:02d}", [10, 20, 30])
+        _fake_trial(gpu, "tune_r2_pets_cartpole", f"trial_{i:02d}", [100, 270, 280] if i == 5 else [10, 20, 30, 40])
+    budget = {"methods": ["pets"], "tasks": ["cartpole"], "max_wall_s": {"cartpole": 300}, "trials": 8, "seed": 100}
+    tune.report(gpu, budget, None, tag="r2", tuned_dir=tmp_path / "tuned")
+    import yaml
+
+    best = yaml.safe_load((tmp_path / "tuned" / "pets_naive_cartpole.yaml").read_text())
+    assert best["trial"] == "trial_05" and best["round"] == "tune_r2_pets_cartpole" and best["solved"]
+    table = json.loads((gpu / "analysis" / "tuning_budget.json").read_text())[0]
+    assert table["round"] == "tune_r2_pets_cartpole"
+    assert abs(table["discarded_gpu_hours"] - 8 * 30 / 3600) < 1e-9  # round-1 spend still reported
+
+
+def test_analyze_exclude_filter(tmp_path):
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("analyze", ROOT / "scripts" / "analyze.py")
+    an = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(an)
+    for name in ("pets_naive_cartpole_s0", "ppo_cartpole_s0"):
+        d = tmp_path / "step2_baselines" / name
+        d.mkdir(parents=True)
+        algo = name.split("_")[0]
+        (d / "metrics.jsonl").write_text(json.dumps({"algo": algo, "impl": "x", "task": "cartpole", "seed": 0,
+                                                     "wall_s": 1, "env_steps": 1, "reward_mean": 1}) + "\n")
+    runs = an.load_runs(tmp_path, ["step2_baselines"], ["step2_baselines/pets_*"])
+    assert [r["algo"] for r in runs] == ["ppo"]
+
+
+def test_exp_never_destroys_a_stopped_instance(monkeypatch):
+    from types import SimpleNamespace as NS
+
+    from gpubench.launcher import cli
+
+    destroyed = []
+    monkeypatch.setattr(cli.I, "show", lambda i: {"id": i, "actual_status": "exited", "intended_status": "stopped"})
+    monkeypatch.setattr(cli.I, "destroy", lambda i: destroyed.append(i))
+    monkeypatch.setattr(cli, "expand", lambda f: {"exp": "x", "jobs": [1]})
+
+    def boom(gpu, offer, allow_dirty, created):  # simulate: created, then the run fails while the instance is stopped
+        created.append(123)
+        raise RuntimeError("ssh failed")
+
+    monkeypatch.setattr(cli, "_up_with_retry", boom)
+    args = NS(exp=["e.yaml"], max_hours=1, instance=None, gpu="rtx4090", offer=None, allow_dirty=False, keep=False)
+    assert cli.cmd_exp(args) == 1
+    assert destroyed == []  # stopped -> kept for manual recovery
+    monkeypatch.setattr(cli.I, "show", lambda i: None)  # gone / never existed -> clean up
+    assert cli.cmd_exp(args) == 1 and destroyed == [123]

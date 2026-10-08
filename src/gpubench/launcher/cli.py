@@ -146,15 +146,35 @@ def _up(gpu: str, offer: int | None, allow_dirty: bool, wait: bool = True,
     return inst_id, inst, rem
 
 
+def _find_offers(gpu: str, tried: set, wait_min: float) -> list[dict]:
+    """Matching offers not yet tried; with --wait-offer, poll until one appears (pinned-CPU hosts come and go)."""
+    deadline = time.time() + wait_min * 60
+    while True:
+        cands = [o for o in I.search(gpu, limit=10) if o["id"] not in tried]
+        if cands or time.time() >= deadline:
+            return cands
+        print(f"  no matching {gpu} offer right now (cpu filter: {os.environ.get('GPUBENCH_CPU_REGEX') or 'none'}); "
+              f"checking again in 60 s ({max(0, deadline - time.time()) / 60:.0f} min left)", flush=True)
+        time.sleep(60)
+
+
 def _up_with_retry(gpu: str, offer: int | None, allow_dirty: bool, created: list, attempts: int = 3):
     """`_up`, moving on to the next-cheapest offer when a host never starts its container."""
     if offer is not None:
         return _up(gpu, offer, allow_dirty, created=created)
+    wait_min = float(os.environ.get("GPUBENCH_WAIT_OFFER_MIN") or 0)
     tried: set = set()
     last_err = None
     for _ in range(attempts):
-        cands = [o for o in I.search(gpu, limit=10) if o["id"] not in tried]
+        cands = _find_offers(gpu, tried, wait_min if not tried else 0)
         if not cands:
+            if not tried:
+                spec = I.gpu_spec(gpu)
+                raise RuntimeError(
+                    f"no {gpu} offers match right now.\n  query: {spec['query']}\n  cpu filter: "
+                    f"{os.environ.get('GPUBENCH_CPU_REGEX') or 'none'}\n  check: gpubench-vast offers {gpu}"
+                    + (f" --cpu \"{os.environ['GPUBENCH_CPU_REGEX']}\"" if os.environ.get("GPUBENCH_CPU_REGEX") else "")
+                    + "\n  or wait for one: add --wait-offer 30")
             break
         tried.add(cands[0]["id"])
         n_before = len(created)
@@ -185,6 +205,14 @@ def cmd_rebootstrap(a):
     I.wait_ready(inst)
     _stamp_price(rem, inst)
     print(f"ready: gpubench-vast ssh {inst_id}")
+    return 0
+
+
+def cmd_start(a):
+    """Start a stopped instance (its disk, including unpulled results, is intact)."""
+    inst_id = I.resolve_id(a.id)
+    print(I.vast_client().start_instance(id=inst_id))
+    print(f"starting {inst_id}; then: gpubench-vast wait {inst_id}")
     return 0
 
 
@@ -263,7 +291,7 @@ def cmd_run(a):
     for i, f in enumerate(a.exp):
         exp = _start_exp(rem, f, sha)
         if i < len(a.exp) - 1:  # jobs must not overlap on one GPU: wait before starting the next file
-            _wait_exp(rem, exp)
+            _wait_exp(rem, exp, inst_id=inst_id)
     return 0
 
 
@@ -284,14 +312,34 @@ def _print_status(st: dict):
             print(f"    FAILED {n} (rc={j.get('returncode')}) -> gpubench-vast logs --job {st['exp']}/{n}")
 
 
-def _wait_exp(rem: Remote, exp: str, poll_s: int = 60, deadline: float | None = None) -> dict:
+def _wait_exp(rem: Remote, exp: str, poll_s: int = 60, deadline: float | None = None, inst_id: int | None = None) -> dict:
+    """Poll the job runner's status file. When ssh fails, look at the instance itself: a stopped instance is
+    reported (once) instead of polled silently, and after a restart the ssh endpoint is refreshed."""
     last = None
+    last_state = "running"
     while True:
         try:
             st = _exp_status(rem, exp)
         except Exception as e:
             print(f"  (status poll failed: {e}; retrying)")
             st = None
+        if st is None and inst_id is not None:
+            try:
+                inst = I.show(inst_id) or {}
+            except Exception:
+                inst = {}
+            state = inst.get("actual_status") or "unknown"
+            if state != last_state:
+                if state == "running":
+                    rem = Remote.from_instance(inst)  # ports can change across a stop/start
+                    print(f"  instance {inst_id} is running again. Its job runner did not survive the restart; resume "
+                          f"with:  gpubench-vast run configs/exp/{exp}.yaml --id {inst_id}   (finished jobs are skipped)",
+                          flush=True)
+                else:
+                    print(f"  WARNING: instance {inst_id} is '{state}' (intended: {inst.get('intended_status')}). Jobs are "
+                          f"paused and nothing can be pulled. Restart it: gpubench-vast start {inst_id}  (or the Vast "
+                          f"console). Do NOT Ctrl-C this command before it is running again.", flush=True)
+                last_state = state
         if st:
             key = json.dumps({k: v["state"] for k, v in st["jobs"].items()}) + st["state"]
             if key != last:
@@ -393,7 +441,7 @@ def cmd_exp(a):
         failed = False
         for f in a.exp:
             exp = _start_exp(rem, f, sha)
-            st = _wait_exp(rem, exp, deadline=deadline)
+            st = _wait_exp(rem, exp, deadline=deadline, inst_id=inst_id)
             failed |= st["state"] == "failed"
             _pull(inst_id, inst, rem)  # pull after every exp so nothing is lost if a later one hangs
         code = 1 if failed else 0
@@ -404,14 +452,22 @@ def cmd_exp(a):
     finally:
         inst_id = inst_id if inst_id is not None else (created[-1] if created else None)
         if inst_id is not None:
+            pulled, state = False, "unknown"
             try:
                 inst = I.show(inst_id)
-                if inst and inst.get("actual_status") == "running":
+                state = (inst or {}).get("actual_status") or "gone"
+                if inst and state == "running":
                     _pull(inst_id, inst, Remote.from_instance(inst))
+                    pulled = True
             except Exception as e:
                 print(f"final pull failed: {e}")
             if a.keep or a.instance:
                 print(f"keeping instance {inst_id} (remember `gpubench-vast down {inst_id}`)")
+            elif not pulled and state not in ("gone", "created", "loading", "unknown"):
+                # a stopped instance still holds unpulled results on its disk: never destroy it automatically
+                print(f"NOT destroying instance {inst_id}: it is '{state}' and its results could not be pulled.\n"
+                      f"  1) gpubench-vast start {inst_id}   2) gpubench-vast wait {inst_id}\n"
+                      f"  3) gpubench-vast pull {inst_id}    4) gpubench-vast down {inst_id} -y")
             else:
                 I.destroy(inst_id)
     return code
@@ -462,6 +518,7 @@ def main(argv=None):
         sp.add_argument("gpu")
         sp.add_argument("--offer", type=int)
         sp.add_argument("--cpu", help="regex on host CPU name (see `offers --cpu`)")
+        sp.add_argument("--wait-offer", type=float, default=0, metavar="MIN", help="wait up to MIN minutes for a matching offer")
         sp.add_argument("--allow-dirty", action="store_true")
         if name == "up":
             sp.add_argument("--no-wait", action="store_true")
@@ -470,6 +527,7 @@ def main(argv=None):
     add("ls", cmd_ls, "list your Vast instances (and their running cost)")
     add("rebootstrap", cmd_rebootstrap, "re-run infra/bootstrap.sh on the instance (after sync)").add_argument("id", nargs="?")
     add("wait", cmd_wait, "wait until the instance's bootstrap is done").add_argument("id", nargs="?")
+    add("start", cmd_start, "start a stopped instance").add_argument("id", nargs="?")
     for name, fn, h in [("show", cmd_show, "instance details"), ("pull", cmd_pull, "download results/ + logs"),
                         ("freeze", cmd_freeze, "write requirements/remote.lock.txt from instance")]:
         add(name, fn, h).add_argument("id", nargs="?")
@@ -498,6 +556,7 @@ def main(argv=None):
     sp.add_argument("exp", nargs="+")
     sp.add_argument("--offer", type=int)
     sp.add_argument("--cpu", help="regex on host CPU name (see `offers --cpu`)")
+    sp.add_argument("--wait-offer", type=float, default=0, metavar="MIN", help="wait up to MIN minutes for a matching offer")
     sp.add_argument("--instance", help="reuse a running instance instead of creating one (kept afterwards)")
     sp.add_argument("--keep", action="store_true", help="do not destroy at the end")
     sp.add_argument("--max-hours", type=float, default=12.0, help="watchdog: pull + destroy after this long")
@@ -506,6 +565,8 @@ def main(argv=None):
     a = p.parse_args(argv)
     if getattr(a, "cpu", None):
         os.environ["GPUBENCH_CPU_REGEX"] = a.cpu
+    if getattr(a, "wait_offer", 0):
+        os.environ["GPUBENCH_WAIT_OFFER_MIN"] = str(a.wait_offer)
     os.chdir(I.ROOT)  # state dir / results are relative to the repo root
     return a.fn(a)
 

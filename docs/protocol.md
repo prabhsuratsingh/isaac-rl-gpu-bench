@@ -74,7 +74,10 @@ Frozen 2026-10-06 in `configs/thresholds.yaml` from `results/rtx4090/step1_ppo` 
 
 Every method gets the same hyperparameter search budget per task:
 
-- **Search:** seeded random search (`scripts/tune.py`, no external dependency). The budget is in `configs/tuning/budget.yaml` and is identical for every method.
+- **The budget is wall-clock, and only wall-clock (v0.5).** Every trial and every development baseline gets the same per-run cap: 300 s on cartpole, 1200 s on ant. Step and iteration limits are set to effectively unlimited (`algo.total_env_steps=1e8`, raised `max_iterations`) so that they can never end a run first.
+  - Why this rule exists: in round 1 of the step-2 tuning, PETS and MBPO carried fixed step budgets (40k / 300k) that ended 9 of 16 cartpole trials after 85–150 s of their 300 s, and every PETS-ant trial after 475–1,017 s of its 1,200 s. Meanwhile PPO had its iteration limit raised. Round 2 (`tune_r2_*`) re-ran the same sampled configurations under this rule.
+  - Round 1's spend is still reported, as "discarded GPU-h".
+- **Search:** seeded random search (`scripts/tune.py`, no external dependency). The budget is in `configs/tuning/budget.yaml` and is identical for every method. A re-run round re-tests the same configurations, because the sampler seed does not depend on the round.
   - **Step 2 (small budget):** 8 trials per (method, task), 1 tuning seed (100), with per-trial wall-clock caps of 300 s (cartpole) and 1200 s (ant).
   - **Later (full budget):** 20 trials × 3 tuning seeds.
   - Trial 0 is always the untuned default.
@@ -136,6 +139,7 @@ bash scripts/profile.sh <name> algo=<a> task=<t> seed=0 profile.start=<i0> profi
 ## 9. Change log
 
 - v0.1: initial protocol (step 1).
+- v0.5 (2026-10-08): the budget is wall-clock only (step/iteration limits must not bind); tuning rounds (`tune_r2_*`) with all-round spend accounting; default model-based baselines re-run as `step2b_baselines`.
 - v0.4 (2026-10-07): "learns" criterion; equal-budget tuning procedure (seeded random search, objective, stop-at-τ, accounting); shared Reporter schema; MBPO and random baseline added.
 - v0.3 (2026-10-06): reward window = min(100, num_envs); one comparison = one host (CPU recorded, `--cpu` filter); cross-host reproducibility measured.
 - v0.2 (2026-10-06): τ frozen; `reward_mean` unified to last-100 episodes for all methods; Nsight GPU-busy attribution; base image digest guard (`infra/gpus.yaml: image_digest`).

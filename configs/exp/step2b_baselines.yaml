@@ -1,0 +1,17 @@
+# Step-2b DEFAULT (untuned) baselines for the model-based methods under the corrected budget
+# (protocol v0.5): wall-clock is the only budget (300 s cartpole / 1200 s ant, as in tuning), steps are
+# unlimited. Supersedes step2_baselines/{pets,mbpo}_* (step-limited); step2_baselines/ppo_* stays valid
+# because PPO's own iteration budget already reaches its final return.
+name: step2b_baselines
+timeout_min: 40
+jobs:
+  - matrix:
+      algo: [pets_naive, mbpo_naive]
+      task: [cartpole]
+      seed: [0, 1, 2]
+    overrides: {algo.max_wall_s: 300, algo.total_env_steps: 100000000}
+  - matrix:
+      algo: [pets_naive, mbpo_naive]
+      task: [ant]
+      seed: [0, 1, 2]
+    overrides: {algo.max_wall_s: 1200, algo.total_env_steps: 100000000}

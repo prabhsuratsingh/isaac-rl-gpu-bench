@@ -42,12 +42,17 @@ PHASE_COLOR["other"] = "#b5b3ad"
 
 
 # ---------------------------------------------------------------------------------------------- loading
-def load_runs(gpu_dir: Path, exps: list[str] | None) -> list[dict]:
+def load_runs(gpu_dir: Path, exps: list[str] | None, exclude: list[str] | None = None) -> list[dict]:
+    """`exclude`: fnmatch patterns on "<exp>/<run_id>" (e.g. superseded step-limited runs)."""
+    from fnmatch import fnmatch
+
     runs = []
     for exp_dir in sorted(p for p in gpu_dir.iterdir() if p.is_dir() and not p.name.startswith("_")):
         if (exps and exp_dir.name not in exps) or (not exps and (exp_dir.name in SKIP_DIRS or "syncdebug" in exp_dir.name)):
             continue
         for run_dir in sorted(p for p in exp_dir.iterdir() if (p / "metrics.jsonl").exists()):
+            if any(fnmatch(f"{exp_dir.name}/{run_dir.name}", pat) for pat in (exclude or [])):
+                continue
             rows = [json.loads(l) for l in open(run_dir / "metrics.jsonl") if l.strip()]
             summ = json.loads((run_dir / "summary.json").read_text()) if (run_dir / "summary.json").exists() else {}
             meta = json.loads((run_dir / "run_meta.json").read_text()) if (run_dir / "run_meta.json").exists() else {}
@@ -165,6 +170,10 @@ def gate_markdown(s: pd.DataFrame, easy: str = "cartpole", loco: str = "ant") ->
         r = s[(s.task == task) & (s.algo == algo)]
         return None if r.empty else bool(r.learns.fillna(False).any())
 
+    def which(task, algo):
+        r = s[(s.task == task) & (s.algo == algo) & (s.learns.fillna(False))]
+        return ", ".join(sorted(r.impl)) or "none"
+
     lines = ["| task | method | final return | random | learn bar (10% PPO) | learns |", "|---|---|---|---|---|---|"]
     for _, r in s[s.algo != "random"].iterrows():
         lines.append(f"| {r.task} | {r.algo} ({r.impl}) | {_fmt(r.final_reward, r.final_reward_lo, r.final_reward_hi)} | "
@@ -175,8 +184,10 @@ def gate_markdown(s: pd.DataFrame, easy: str = "cartpole", loco: str = "ant") ->
     loco_ok = all(learns(loco, m) for m in ("ppo", "pets"))
     mbpo_loco = learns(loco, "mbpo")
     lines.append("")
-    lines.append(f"- all three learn on {easy}: **{'yes' if easy_ok else 'no'}**")
-    lines.append(f"- PPO and PETS learn on {loco}: **{'yes' if loco_ok else 'no'}**")
+    lines.append(f"- all three learn on {easy}: **{'yes' if easy_ok else 'no'}** "
+                 f"(passing configs: {'; '.join(f'{m}: {which(easy, m)}' for m in ('ppo', 'pets', 'mbpo'))})")
+    lines.append(f"- PPO and PETS learn on {loco}: **{'yes' if loco_ok else 'no'}** "
+                 f"(passing configs: {'; '.join(f'{m}: {which(loco, m)}' for m in ('ppo', 'pets'))})")
     lines.append(f"- MBPO on {loco}: {'learns' if mbpo_loco else 'does not learn -> dropped on locomotion (gate rule)'}")
     lines.append(f"\n**Gate: {'MET' if easy_ok and loco_ok else 'NOT MET'}** (learns = 95% CI lower bound of the final "
                  f"return above the random policy's return, and mean >= {LEARN_FRAC:.0%} of PPO's final return)")
@@ -375,6 +386,8 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("gpu_dir", type=Path)
     p.add_argument("--exps", nargs="*")
+    p.add_argument("--exclude", action="append", default=[], metavar="GLOB",
+                   help='skip runs matching "<exp>/<run_id>", e.g. "step2_baselines/pets_*" (repeatable)')
     p.add_argument("--thresholds", type=Path, default=ROOT / "configs" / "thresholds.yaml")
     p.add_argument("--derive-thresholds", action="store_true")
     p.add_argument("--no-plots", action="store_true")
@@ -383,7 +396,7 @@ def main():
     p.add_argument("--paper", metavar="TAG", help="also copy figures + LaTeX table to docs/paper/generated/<gpu>_<TAG>_*")
     a = p.parse_args()
 
-    runs = load_runs(a.gpu_dir, a.exps)
+    runs = load_runs(a.gpu_dir, a.exps, a.exclude)
     if not runs:
         sys.exit(f"no runs found under {a.gpu_dir}")
     if a.derive_thresholds:

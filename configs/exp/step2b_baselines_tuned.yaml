@@ -1,0 +1,27 @@
+# Step-2b TUNED baselines (best trial of the equal budget, configs/tuned/*.yaml) for all three methods,
+# under the same wall-clock budget as tuning (300 s cartpole / 1200 s ant; model-based steps unlimited).
+# PPO stops at the cap too, which is past its own convergence on both tasks.
+# Requires `python scripts/tune.py report results/<gpu> --tag r2` to have been run and committed first.
+name: step2b_baselines_tuned
+timeout_min: 40
+jobs:
+  - matrix:
+      algo: [ppo]
+      task: [cartpole]
+      seed: [0, 1, 2]
+    overrides: {tuned: true, algo.max_wall_s: 300}
+  - matrix:
+      algo: [pets_naive, mbpo_naive]
+      task: [cartpole]
+      seed: [0, 1, 2]
+    overrides: {tuned: true, algo.max_wall_s: 300, algo.total_env_steps: 100000000}
+  - matrix:
+      algo: [ppo]
+      task: [ant]
+      seed: [0, 1, 2]
+    overrides: {tuned: true, algo.max_wall_s: 1200}
+  - matrix:
+      algo: [pets_naive, mbpo_naive]
+      task: [ant]
+      seed: [0, 1, 2]
+    overrides: {tuned: true, algo.max_wall_s: 1200, algo.total_env_steps: 100000000}
