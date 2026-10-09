@@ -16,6 +16,7 @@ from gpubench.common.timing import ProfilerWindow
 from gpubench.envs.costs import ANT_ACTION_SLICE, make_cost
 
 from .buffer import GpuReplayBuffer
+from .ensemble_batched import BatchedEnsemble
 from .ensemble_naive import NaiveEnsemble
 from .mppi_naive import NaiveMPPI
 
@@ -36,36 +37,77 @@ def sync_guard(mode: str | int):
         torch.cuda.set_sync_debug_mode(prev)
 
 
+ENSEMBLES = {"naive": NaiveEnsemble, "batched": BatchedEnsemble}
+
+
 def build_model(m: dict, obs_dim: int, act_dim: int, cost_kind: str, device, impl: str = "naive"):
-    if impl != "naive":
-        raise NotImplementedError(f"ensemble impl '{impl}' lands in the systems-ablation step")
-    model = NaiveEnsemble(obs_dim, act_dim, m["ensemble_size"], m["hidden"], m["layers"], ACTION_OBS_SLICES.get(cost_kind)).to(device)
+    if impl not in ENSEMBLES:
+        raise NotImplementedError(f"ensemble impl '{impl}' (available: {sorted(ENSEMBLES)})")
+    model = ENSEMBLES[impl](obs_dim, act_dim, m["ensemble_size"], m["hidden"], m["layers"],
+                            ACTION_OBS_SLICES.get(cost_kind)).to(device)
     opt = torch.optim.Adam(model.parameters(), lr=m["lr"], weight_decay=m.get("weight_decay", 0.0))
     return model, opt
 
 
-def train_model(model, opt, buf: GpuReplayBuffer, steps: int, batch: int):
+def train_model(model, opt, buf: GpuReplayBuffer, steps: int, batch: int, early_stop: dict | None = None):
+    """`steps` gradient steps on bootstrap batches (one independent batch per member).
+
+    early_stop = {holdout_frac, holdout_max, check_every, patience}: hold out a random split of the
+    buffer this round, check its MSE every `check_every` steps and stop after `patience` checks without
+    improvement. The checks read a scalar back (a host sync), but only inside the model_train phase,
+    never in the act loop. Returns (loss, mse, steps_done).
+    """
     model.fit_normalizer(*buf.all()[:4])
     model.train()
     loss = mse = None
-    for _ in range(steps):
-        idx = buf.sample_idx((model.E, batch))  # independent bootstrap batch per member
+    n = buf.size
+    pool = hold = None
+    if early_stop:
+        n_hold = min(int(early_stop.get("holdout_max", 20000)), max(1, int(n * early_stop.get("holdout_frac", 0.1))))
+        perm = torch.randperm(n, device=buf.device)
+        hold, pool = perm[:n_hold], perm[n_hold:]
+    best, bad, done = float("inf"), 0, 0
+    for step in range(steps):
+        if pool is not None:
+            idx = pool[torch.randint(0, pool.numel(), (model.E, batch), device=buf.device)]
+        else:
+            idx = buf.sample_idx((model.E, batch))  # independent bootstrap batch per member
         o, a, no, v = buf.get(idx)
         loss, mse = model.loss(o, a, no, v)
         opt.zero_grad(set_to_none=True)
         loss.backward()
         opt.step()
+        done = step + 1
+        if early_stop and done % int(early_stop.get("check_every", 100)) == 0:
+            h = model.eval_mse(*buf.get(hold)).item()
+            if h < best - 1e-6:
+                best, bad = h, 0
+            else:
+                bad += 1
+                if bad >= int(early_stop.get("patience", 5)):
+                    break
     model.eval()
-    return loss.detach(), mse.detach()
+    return loss.detach(), mse.detach(), done
 
 
 def model_train_steps(m: dict, buf_size: int, first: bool) -> int:
-    """Fixed gradient-step budget per round, or `train_epochs_per_round` passes over the buffer."""
+    """Fixed gradient-step budget per round, or `train_epochs_per_round` passes over the buffer
+    (capped by `max_train_steps` when set)."""
     if first:
-        return int(m["first_train_steps"])
-    if m.get("train_epochs_per_round"):
-        return max(1, int(m["train_epochs_per_round"] * buf_size / m["batch_size"]))
-    return int(m["train_steps"])
+        steps = int(m["first_train_steps"])
+    elif m.get("train_epochs_per_round"):
+        steps = max(1, int(m["train_epochs_per_round"] * buf_size / m["batch_size"]))
+    else:
+        steps = int(m["train_steps"])
+    if m.get("max_train_steps"):
+        steps = min(steps, int(m["max_train_steps"]))
+    return steps
+
+
+def early_stop_cfg(m: dict) -> dict | None:
+    if not m.get("early_stop"):
+        return None
+    return {k: m[k] for k in ("holdout_frac", "holdout_max", "check_every", "patience") if m.get(k) is not None}
 
 
 def annealed(v0: float, v1: float | None, steps: int, anneal_steps: int | None) -> float:
@@ -86,7 +128,8 @@ def run(cfg: dict, logger, venv, env_cfg, timer):
     planner = NaiveMPPI(model, cost_fn, B, da, device, horizon=mp["horizon"], samples=mp["samples"],
                         particles=mp["particles"], iterations=mp["iterations"], temperature=mp["temperature"],
                         noise_std=mp["noise_std"], action_repeat=mp.get("action_repeat", 1),
-                        noise_decay=mp.get("noise_decay", 1.0))
+                        noise_decay=mp.get("noise_decay", 1.0), elite_frac=mp.get("elite_frac"),
+                        min_std=mp.get("min_std", 0.05))
     buf = GpuReplayBuffer(a["buffer_capacity"], do, da, device)
     rep = Reporter.from_cfg(cfg, logger, timer, "pets", B)
 
@@ -117,8 +160,8 @@ def run(cfg: dict, logger, venv, env_cfg, timer):
                     ridx = buf.recent_idx(train_every * B)
                     holdout = model.eval_mse(*buf.get(ridx))
                 steps = model_train_steps(a["model"], buf.size, first=not trained)
-                loss, mse = train_model(model, opt, buf, steps, a["model"]["batch_size"])
-            model_stats = {"model_loss": loss, "model_train_mse": mse, "model_holdout_mse": holdout, "model_train_steps": steps}
+                loss, mse, done = train_model(model, opt, buf, steps, a["model"]["batch_size"], early_stop_cfg(a["model"]))
+            model_stats = {"model_loss": loss, "model_train_mse": mse, "model_holdout_mse": holdout, "model_train_steps": done}
             trained = True
 
         # ---- act ------------------------------------------------------------------------------

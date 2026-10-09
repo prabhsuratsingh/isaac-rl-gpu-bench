@@ -49,6 +49,8 @@ def _sample(spec: dict, rng: random.Random, drawn: dict):
 
 
 def _fmt(v) -> str:
+    if v is None:  # must parse back as YAML null, not the string "None"
+        return "null"
     if isinstance(v, bool):
         return "true" if v else "false"
     if isinstance(v, (list, dict)):
@@ -216,11 +218,15 @@ def main():
     r.add_argument("gpu_dir", type=Path)
     r.add_argument("--paper", metavar="TAG")
     r.add_argument("--tag", help="prefer this round's results where they exist")
+    r.add_argument("--methods", nargs="*", help="restrict to these methods (default: budget.yaml methods)")
+    r.add_argument("--tasks", nargs="*", help="restrict to these tasks")
     a = p.parse_args()
     budget = yaml.safe_load((CFG / "tuning" / "budget.yaml").read_text())
     if a.cmd == "generate":
         generate([a.method] if a.method else budget["methods"], [a.task] if a.task else budget["tasks"], budget, a.tag)
     else:
+        if a.methods or a.tasks:
+            budget = {**budget, "methods": a.methods or budget["methods"], "tasks": a.tasks or budget["tasks"]}
         report(a.gpu_dir, budget, a.paper, a.tag)
 
 

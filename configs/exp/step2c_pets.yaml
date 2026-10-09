@@ -1,0 +1,18 @@
+# Step 2c: PETS retry. The batched ensemble plus a properly trained model (holdout early stopping),
+# evaluated on Ant (tuned, the gate question) and on Cartpole (default, a sanity check that the
+# batched implementation still learns the easy task). Same wall-clock budget as every step-2 run.
+# Requires `python scripts/tune.py report results/<gpu> --tag pr --methods pets_batched --tasks ant`
+# to have been run and configs/tuned/pets_batched_ant.yaml committed first.
+name: step2c_pets
+timeout_min: 40
+jobs:
+  - matrix:
+      algo: [pets_batched]
+      task: [ant]
+      seed: [0, 1, 2]
+    overrides: {tuned: true, algo.max_wall_s: 1200, algo.total_env_steps: 100000000}
+  - matrix:
+      algo: [pets_batched]
+      task: [cartpole]
+      seed: [0, 1, 2]
+    overrides: {algo.max_wall_s: 300, algo.total_env_steps: 100000000}

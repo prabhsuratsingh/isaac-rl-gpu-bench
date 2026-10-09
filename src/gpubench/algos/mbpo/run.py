@@ -24,7 +24,7 @@ import math
 import torch
 
 from gpubench.algos.pets.buffer import GpuReplayBuffer
-from gpubench.algos.pets.run import build_model, model_train_steps, sync_guard, train_model
+from gpubench.algos.pets.run import build_model, early_stop_cfg, model_train_steps, sync_guard, train_model
 from gpubench.common.reporter import Reporter
 from gpubench.common.timing import ProfilerWindow
 from gpubench.envs.costs import make_cost
@@ -118,7 +118,7 @@ def run(cfg: dict, logger, venv, env_cfg, timer):
                 with timer.phase("model_train"):
                     holdout = model.eval_mse(*real.get(real.recent_idx(train_every * B))) if trained else None
                     steps = model_train_steps(m, real.size, first=not trained)
-                    loss, mse = train_model(model, model_opt, real, steps, m["batch_size"])
+                    loss, mse, _ = train_model(model, model_opt, real, steps, m["batch_size"], early_stop_cfg(m))
                     sac.set_obs_norm(model.in_mean[:do], model.in_std[:do])
                 stats.update(model_loss=loss, model_train_mse=mse, model_holdout_mse=holdout)
                 trained = True

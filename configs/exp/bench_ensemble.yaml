@@ -1,0 +1,9 @@
+# ~1 min GPU microbenchmark (no simulator): naive vs batched ensemble at the PETS-Ant sizes.
+# Runs first in the step-2c session so the speed-up is confirmed before the tuning results are read.
+name: bench_ensemble
+timeout_min: 10
+jobs:
+  - name: ensemble_ant_sizes
+    cmd: python scripts/bench_ensemble.py --out results/bench/ensemble_ant.json
+  - name: ensemble_cartpole_sizes
+    cmd: python scripts/bench_ensemble.py --obs 4 --act 1 --hidden 200 --samples 400 --horizon 25 --batch 256 --out results/bench/ensemble_cartpole.json

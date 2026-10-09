@@ -22,6 +22,8 @@ model:
   first_train_steps: 2000
   train_steps: 300           # gradient steps per retraining round ...
   train_epochs_per_round: null   # ... or this many passes over the buffer instead (overrides train_steps)
+  max_train_steps: null
+  early_stop: false              # holdout early stopping (off: step-2 behaviour)
 
 mppi:
   horizon: 25
@@ -34,3 +36,5 @@ mppi:
   noise_std_final: null      # anneal sigma linearly to this value ...
   noise_anneal_steps: null   # ... over this many env steps
   action_repeat: 1           # hold each planned action this many model steps (horizon must be divisible)
+  elite_frac: null           # CEM-style sigma refit (null = pure MPPI, step-2 behaviour)
+  min_std: 0.05

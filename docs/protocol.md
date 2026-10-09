@@ -139,6 +139,8 @@ bash scripts/profile.sh <name> algo=<a> task=<t> seed=0 profile.start=<i0> profi
 ## 9. Change log
 
 - v0.1: initial protocol (step 1).
+- v0.6 (2026-10-09): PETS retry on Ant (step 2c). Adds the batched ensemble (`impl: batched`, one baddbmm per layer for all members), holdout early stopping for model training (its scalar checks sync only inside the model_train phase, never in the act loop), and an optional CEM-style elite refit in MPPI. Its tuning round (8 trials, same caps) is recorded as PETS-only extra development effort.
+- v0.5 (2026-10-08), step-2 gate decision: on locomotion the model-based contender may be MBPO instead of PETS (mirror of the original "drop MBPO if it struggles" rule). Result: Cartpole all three learn; Ant: PPO and MBPO learn, PETS reaches 1,070 against the 1,667 bar, limited by naive speed. PETS stays on Cartpole and is re-tested on Ant after the systems optimisations (same wall budget, more steps/s).
 - v0.5 (2026-10-08): the budget is wall-clock only (step/iteration limits must not bind); tuning rounds (`tune_r2_*`) with all-round spend accounting; default model-based baselines re-run as `step2b_baselines`.
 - v0.4 (2026-10-07): "learns" criterion; equal-budget tuning procedure (seeded random search, objective, stop-at-τ, accounting); shared Reporter schema; MBPO and random baseline added.
 - v0.3 (2026-10-06): reward window = min(100, num_envs); one comparison = one host (CPU recorded, `--cpu` filter); cross-host reproducibility measured.

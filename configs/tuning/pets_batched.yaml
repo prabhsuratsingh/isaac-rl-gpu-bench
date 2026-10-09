@@ -1,0 +1,16 @@
+# PETS-on-Ant retry (step 2c): tuning space for the batched-ensemble PETS with proper model training.
+# Same budget as every other method (configs/tuning/budget.yaml: 8 trials, 1200 s cap, seed 100); the spend
+# is recorded as PETS-only extra development effort. 6 sampled dimensions.
+algo_file: pets_batched
+space:
+  algo.mppi.horizon: {choice: [12, 18, 24, 30]}
+  algo.mppi.samples: {choice: [400, 800, 1600]}
+  algo.mppi.elite_frac: {choice: [null, 0.1, 0.2]}
+  algo.model.train_epochs_per_round: {choice: [1, 2, 5]}
+  algo.model.batch_size: {choice: [512, 1024, 2048]}
+  algo.mppi.noise_std: {loguniform: [0.2, 0.6]}
+fixed:
+  ant:
+    algo.mppi.action_repeat: 1      # step-2 evidence: action repeat 3 diverges on Ant
+    algo.mppi.noise_decay: 0.9      # step-2 best trial used ~0.94; not re-searched
+  cartpole: {}

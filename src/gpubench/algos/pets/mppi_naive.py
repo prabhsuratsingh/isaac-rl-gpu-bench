@@ -16,6 +16,9 @@ Optional knobs (defaults reproduce the step-1 planner exactly):
                    same model-step budget; the coarse plan shifts by one segment every r env steps.
   noise_decay d    sigma_i = sigma * d**i over the MPPI iterations of one plan() (coarse-to-fine).
   sigma            settable between calls (run.py anneals it over training).
+  elite_frac f     CEM-style refit: after each iteration the next iteration's sigma is the per-env,
+                   per-step std of the top-f fraction of sequences (floored at min_std). The mean stays
+                   the MPPI-weighted average. sigma resets to its base value at every plan().
 """
 
 from __future__ import annotations
@@ -26,7 +29,8 @@ import torch
 class NaiveMPPI:
     def __init__(self, model, cost_fn, num_envs: int, act_dim: int, device, horizon: int = 25, samples: int = 400,
                  particles: int = 1, iterations: int = 2, temperature: float = 0.5, noise_std: float = 0.5,
-                 action_low: float = -1.0, action_high: float = 1.0, action_repeat: int = 1, noise_decay: float = 1.0):
+                 action_low: float = -1.0, action_high: float = 1.0, action_repeat: int = 1, noise_decay: float = 1.0,
+                 elite_frac: float | None = None, min_std: float = 0.05):
         self.model, self.cost_fn = model, cost_fn
         self.B, self.A, self.H, self.K, self.P = num_envs, act_dim, horizon, samples, particles
         self.E = model.E
@@ -36,6 +40,8 @@ class NaiveMPPI:
             raise ValueError(f"horizon ({horizon}) must be divisible by action_repeat ({action_repeat})")
         self.iters, self.lam, self.sigma = iterations, temperature, noise_std
         self.r, self.decay = int(action_repeat), float(noise_decay)
+        self.n_elite = max(2, int(round(self.K * elite_frac))) if elite_frac else None
+        self.min_std = float(min_std)
         self.Hc = self.H // self.r  # coarse decision steps
         self.lo, self.hi = action_low, action_high
         self.device = device
@@ -104,7 +110,12 @@ class NaiveMPPI:
             z = (R - R.max(dim=1, keepdim=True).values) / (self.lam * (R.std(dim=1, keepdim=True) + 1e-6))
             w = torch.softmax(z, dim=1)  # scale-free temperature: lam in units of return std
             self.mean = (w[:, :, None, None] * coarse).sum(1)
-            sigma = sigma * self.decay
+            if self.n_elite:  # refit the sampling std to the elites (topk/gather: no host sync)
+                top = R.topk(self.n_elite, dim=1).indices  # [B, k]
+                elites = coarse.gather(1, top[:, :, None, None].expand(-1, -1, self.Hc, self.A))
+                sigma = elites.std(dim=1).clamp_min(self.min_std)[:, None] * self.decay  # [B, 1, Hc, A]
+            else:
+                sigma = sigma * self.decay
         act = self.mean[:, 0].clone()
         self._phase += 1
         if self._phase == self.r:  # first coarse segment fully executed: shift the plan

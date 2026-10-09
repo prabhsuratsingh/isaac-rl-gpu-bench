@@ -274,3 +274,74 @@ def test_exp_never_destroys_a_stopped_instance(monkeypatch):
     assert destroyed == []  # stopped -> kept for manual recovery
     monkeypatch.setattr(cli.I, "show", lambda i: None)  # gone / never existed -> clean up
     assert cli.cmd_exp(args) == 1 and destroyed == [123]
+
+
+# ---------------------------------------------------------------------------------------------- step 2c
+def test_batched_ensemble_matches_naive():
+    from gpubench.algos.pets.ensemble_batched import BatchedEnsemble
+
+    torch.manual_seed(0)
+    naive = NaiveEnsemble(6, 2, ensemble_size=5, hidden=32, layers=3, action_obs_slice=slice(4, 6))
+    naive.in_mean.normal_()
+    naive.in_std.uniform_(0.5, 2.0)
+    naive.out_mean.normal_()
+    naive.out_std.uniform_(0.5, 2.0)
+    batched = BatchedEnsemble(6, 2, ensemble_size=5, hidden=32, layers=3, action_obs_slice=slice(4, 6)).load_from_naive(naive)
+    obs, act, nxt = torch.randn(5, 64, 6), torch.randn(5, 64, 2), torch.randn(5, 64, 6)
+    w = (torch.rand(5, 64) > 0.2).float()
+    assert torch.allclose(naive.predict(obs, act, sample=False), batched.predict(obs, act, sample=False), atol=1e-5)
+    ln, mn = naive.loss(obs, act, nxt, w)
+    lb, mb = batched.loss(obs, act, nxt, w)
+    assert torch.allclose(ln, lb, atol=1e-5) and torch.allclose(mn, mb, atol=1e-5)
+    o2, a2, n2, w2 = obs[0], act[0], nxt[0], w[0]
+    assert torch.allclose(naive.eval_mse(o2, a2, n2, w2), batched.eval_mse(o2, a2, n2, w2), atol=1e-5)
+    # gradients flow to every member's stacked weights
+    lb.backward()
+    assert all(p.grad is not None and p.grad.abs().sum() > 0 for p in batched.W)
+
+
+def test_early_stopping_halts_on_plateau():
+    from gpubench.algos.pets.ensemble_batched import BatchedEnsemble
+    from gpubench.algos.pets.run import train_model
+
+    torch.manual_seed(0)
+    buf = GpuReplayBuffer(4000, 3, 1, "cpu")
+    x = torch.randn(4000, 3)
+    buf.add(x, torch.zeros(4000, 1), x + 0.01 * torch.randn(4000, 3), torch.ones(4000, dtype=torch.bool))  # pure noise
+    model = BatchedEnsemble(3, 1, ensemble_size=5, hidden=16, layers=2)
+    opt = torch.optim.Adam(model.parameters(), lr=1e-3)
+    _, _, done = train_model(model, opt, buf, steps=5000, batch=64,
+                             early_stop={"holdout_frac": 0.1, "check_every": 20, "patience": 3})
+    assert done < 5000  # nothing learnable -> holdout stops improving -> stopped early
+    _, _, done2 = train_model(model, opt, buf, steps=50, batch=64)
+    assert done2 == 50
+
+
+def test_elite_refit_shrinks_sigma_and_reaches_goal():
+    cost = lambda s, a, s2: (-(s2 - 3.0).square().sum(-1), torch.zeros(s2.shape[:-1], dtype=torch.bool))  # noqa: E731
+    torch.manual_seed(0)
+    mp = NaiveMPPI(_PerfectModel(), cost, num_envs=4, act_dim=1, device="cpu", horizon=6, samples=100,
+                   iterations=3, noise_std=0.5, elite_frac=0.1)
+    s = torch.zeros(4, 1)
+    for _ in range(10):
+        s = s + mp.plan(s)
+    assert (s - 3.0).abs().max() < 0.4 and mp.n_elite == 10
+
+
+def test_pets_batched_end_to_end(tmp_path):
+    pytest.importorskip("gymnasium")
+    import importlib
+
+    from gpubench.envs.isaac import GpuVecEnv
+
+    cfg = _cfg("pets_batched", tmp_path, **{"algo.total_env_steps": 480, "algo.seed_steps": 160, "algo.train_every": 160,
+                                            "algo.log_every": 160, "algo.model.first_train_steps": 30,
+                                            "algo.model.batch_size": 64, "algo.model.check_every": 10,
+                                            "algo.mppi.samples": 50, "algo.mppi.horizon": 6, "algo.mppi.elite_frac": 0.2})
+    cfg["algo"]["num_envs"] = 8
+    logger = RunLogger(cfg, tmp_path)
+    venv = GpuVecEnv(FakeCartpole(8))
+    importlib.import_module("gpubench.algos.pets.run").run(cfg, logger, venv, CARTPOLE_CFG, PhaseTimer("cpu"))
+    rows = _rows(logger)
+    assert rows and rows[-1]["impl"] == "batched" and all(set(COMMON_KEYS) <= set(r) for r in rows)
+    assert any(r.get("pets/model_train_steps") for r in rows)

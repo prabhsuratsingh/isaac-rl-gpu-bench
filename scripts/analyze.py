@@ -183,13 +183,20 @@ def gate_markdown(s: pd.DataFrame, easy: str = "cartpole", loco: str = "ant") ->
     easy_ok = all(learns(easy, m) for m in ("ppo", "pets", "mbpo"))
     loco_ok = all(learns(loco, m) for m in ("ppo", "pets"))
     mbpo_loco = learns(loco, "mbpo")
+    # Amended 2026-10-08 (protocol v0.5): on locomotion the model-based contender may be MBPO instead of
+    # PETS (mirror of the original "drop MBPO if it struggles" rule); PETS-Ant is re-tested after step 3.
+    loco_amended = bool(learns(loco, "ppo")) and bool(learns(loco, "pets") or mbpo_loco)
     lines.append("")
     lines.append(f"- all three learn on {easy}: **{'yes' if easy_ok else 'no'}** "
                  f"(passing configs: {'; '.join(f'{m}: {which(easy, m)}' for m in ('ppo', 'pets', 'mbpo'))})")
     lines.append(f"- PPO and PETS learn on {loco}: **{'yes' if loco_ok else 'no'}** "
                  f"(passing configs: {'; '.join(f'{m}: {which(loco, m)}' for m in ('ppo', 'pets'))})")
     lines.append(f"- MBPO on {loco}: {'learns' if mbpo_loco else 'does not learn -> dropped on locomotion (gate rule)'}")
-    lines.append(f"\n**Gate: {'MET' if easy_ok and loco_ok else 'NOT MET'}** (learns = 95% CI lower bound of the final "
+    lines.append(f"- amended rule, PPO and one model-based method (PETS or MBPO) learn on {loco}: "
+                 f"**{'yes' if loco_amended else 'no'}**")
+    verdict = "MET" if easy_ok and loco_ok else ("MET (amended: MBPO stands in for PETS on locomotion)"
+                                                  if easy_ok and loco_amended else "NOT MET")
+    lines.append(f"\n**Gate: {verdict}** (learns = 95% CI lower bound of the final "
                  f"return above the random policy's return, and mean >= {LEARN_FRAC:.0%} of PPO's final return)")
     return "\n".join(lines)
 
@@ -299,10 +306,15 @@ def plot_curves(runs, thresholds, out_dir: Path, gpu_label: str):
             groups = {}
             for r in tr:
                 groups.setdefault((r["algo"], r["impl"]), []).append(r)
+            has_tuned = {a for a, i in groups if i.endswith("+tuned")}
             for (algo, impl), rs in sorted(groups.items()):
                 if algo == "random":  # drawn as a reference line instead
                     continue
                 color = ALGO_COLOR.get(algo, SERIES[4])
+                # same method = same hue; the untuned default is dashed when a tuned variant is also shown
+                tuned = impl.endswith("+tuned")
+                ls = (0, (4, 2)) if (algo in has_tuned and not tuned) else "-"
+                end_label = algo.upper() + (" tuned" if tuned else (" default" if algo in has_tuned else ""))
                 curves = []
                 for r in rs:
                     pts = [(x[xkey], x["reward_mean"]) for x in r["rows"] if x.get("reward_mean") is not None and x[xkey] > 0]
@@ -310,17 +322,17 @@ def plot_curves(runs, thresholds, out_dir: Path, gpu_label: str):
                         continue
                     x, y = map(np.asarray, zip(*pts))
                     curves.append((x, y))
-                    ax.plot(x, y, color=color, alpha=0.25, linewidth=1)
+                    ax.plot(x, y, color=color, alpha=0.25, linewidth=1, linestyle=ls)
                 mc = _mean_curve(curves) if curves else None
                 label = f"{algo.upper()} ({impl}, n={len(curves)})"
                 if mc:
                     g, m, lo, hi = mc
                     ax.fill_between(g, lo, hi, color=color, alpha=0.18, linewidth=0)
-                    ax.plot(g, m, color=color, label=label)
-                    ax.annotate(algo.upper(), (g[-1], m[-1]), xytext=(4, 0), textcoords="offset points", color=INK2,
+                    ax.plot(g, m, color=color, label=label, linestyle=ls)
+                    ax.annotate(end_label, (g[-1], m[-1]), xytext=(4, 0), textcoords="offset points", color=INK2,
                                 fontsize=9, va="center")
                 elif curves:
-                    ax.plot([], [], color=color, label=label)
+                    ax.plot([], [], color=color, label=label, linestyle=ls)
             tau = (thresholds.get(task) or {}).get("tau")
             ax.set_xscale("log")
             _plain_log_ticks(ax)
@@ -339,7 +351,7 @@ def plot_curves(runs, thresholds, out_dir: Path, gpu_label: str):
         axes[1].set_title(f"{task}: reward vs samples", loc="left")
         # one shared legend under both panels: never collides with τ or the curve-end labels
         handles, labels = axes[0].get_legend_handles_labels()
-        fig.legend(handles, labels, loc="outside lower center", ncol=max(1, len(labels)))
+        fig.legend(handles, labels, loc="outside lower center", ncol=min(3, max(1, len(labels))))
         fig.savefig(out_dir / f"curves_{task}.png", dpi=200)
         plt.close(fig)
 

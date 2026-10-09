@@ -45,8 +45,10 @@ def test_exp_files_expand(exp):
             import shlex
 
             args = [a for a in shlex.split(j["cmd"]) if "=" in a]
-            if "tuned=true" in args and not any((ROOT / "configs" / "tuned").glob("*.yaml")):
-                args.remove("tuned=true")  # tuned configs appear only after `tune.py report`
+            if "tuned=true" in args:  # tuned configs appear only after `tune.py report`
+                kv = dict(a.split("=", 1) for a in args)
+                if not (ROOT / "configs" / "tuned" / f"{kv['algo']}_{kv['task']}.yaml").exists():
+                    args.remove("tuned=true")
             load_config(args)  # every expanded job resolves to a valid config
 
 
@@ -167,7 +169,7 @@ def test_ensemble_learns_and_pets_beats_random():
         s = s2 if s2.abs().max() < 3 else torch.randn(64, 2) * 0.5
     model = NaiveEnsemble(2, 1, ensemble_size=5, hidden=64, layers=2)
     opt = torch.optim.Adam(model.parameters(), lr=3e-3)
-    _, mse = train_model(model, opt, buf, steps=600, batch=256)
+    _, mse, _ = train_model(model, opt, buf, steps=600, batch=256)
     assert mse.item() < 0.05, mse.item()
 
     def rollout(policy, n=40):
