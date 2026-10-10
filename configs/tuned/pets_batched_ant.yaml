@@ -1,0 +1,16 @@
+method: pets_batched
+task: ant
+trial: trial_02
+round: tune_pr_pets_batched_ant
+objective: 2334.04
+solved: false
+reward: 824.642333984375
+overrides:
+  algo.mppi.action_repeat: 1
+  algo.mppi.noise_decay: 0.9
+  algo.mppi.horizon: 12
+  algo.mppi.samples: 400
+  algo.mppi.elite_frac: 0.2
+  algo.model.train_epochs_per_round: 2
+  algo.model.batch_size: 1024
+  algo.mppi.noise_std: 0.367
