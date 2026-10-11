@@ -1,0 +1,8 @@
+# GPU-only equivalence tests for the step-3 levels (Triton step kernel vs torch cost, naive == batched ==
+# fused == graph on identical noise, bf16 error bound). Runs first; if it fails the session stops.
+name: gpu_tests
+timeout_min: 20
+stop_session_on_fail: true
+jobs:
+  - name: pytest_gpu
+    cmd: python -m pytest -m gpu tests/test_gpu.py -v -s -p no:cacheprovider

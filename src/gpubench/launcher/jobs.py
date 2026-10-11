@@ -66,4 +66,4 @@ def expand(exp_path: str | Path) -> dict:
     dup = {n for n in names if names.count(n) > 1}
     if dup:
         raise ValueError(f"duplicate job names in {exp_path}: {sorted(dup)}")
-    return {"exp": name, "jobs": jobs}
+    return {"exp": name, "jobs": jobs, "stop_session_on_fail": bool(spec.get("stop_session_on_fail", False))}

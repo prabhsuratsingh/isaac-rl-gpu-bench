@@ -128,6 +128,8 @@ def run_table(runs, thresholds, gpu_dir: Path | None = None) -> pd.DataFrame:
             "gpu_h_to_tau": wall_tau / 3600 if wall_tau is not None else None,
             "usd_to_tau": wall_tau / 3600 * dph if (wall_tau is not None and dph) else None,
             "env_steps_per_s": float(np.median(sps)) if sps else None,
+            "planner_steps_per_s": float(np.median([x["planner_steps_per_s"] for x in rows if x.get("planner_steps_per_s")]))
+            if any(x.get("planner_steps_per_s") for x in rows) else None,
             "model_rollouts_per_s": float(np.median([x["model_rollouts_per_s"] for x in rows if x.get("model_rollouts_per_s")]))
             if any(x.get("model_rollouts_per_s") for x in rows) else None,
             "gpu": (r["meta"].get("sys", {}).get("gpu", {}) or {}).get("name"),
@@ -162,6 +164,53 @@ def summary_table(df: pd.DataFrame, thresholds: dict | None = None, random_ref: 
             rec["learns"] = None
         out.append(rec)
     return pd.DataFrame(out)
+
+
+SYSTEM_LEVELS = ["naive", "batched", "fused", "graph", "bf16"]
+
+
+def gate_step3(df: pd.DataFrame, task: str = "cartpole") -> str | None:
+    """Step-3 gate: >= 3x planner throughput over naive with returns not degraded.
+
+    Throughput = median planner_steps_per_s of each run (plan() calls x envs / planning time), averaged
+    over seeds. "Not degraded" = the level's 95% CI upper bound on final return reaches naive's mean, i.e.
+    the level is not significantly worse than naive (3 seeds; any shift is still reported in the notes).
+    """
+    d = df[(df.task == task) & (df.algo == "pets")].copy()
+    d["level"] = d.impl.str.replace("+tuned", "", regex=False)
+    d = d[d.level.isin(SYSTEM_LEVELS)]
+    if d.empty or "naive" not in set(d.level):
+        return None
+    rows, notes = [], []
+    base = d[d.level == "naive"]
+    base_tp = float(base.planner_steps_per_s.mean())
+    base_ret = float(base.final_reward.mean())
+    best = 1.0
+    for lv in SYSTEM_LEVELS:
+        g = d[d.level == lv]
+        if g.empty:
+            continue
+        tp = float(g.planner_steps_per_s.mean())
+        m, lo, hi = bootstrap_ci(g.final_reward.tolist())
+        w, wlo, whi = bootstrap_ci(g.wall_to_tau_s.tolist())
+        sp = tp / base_tp
+        ok = lv == "naive" or not np.isfinite(hi) or hi >= base_ret
+        if lv != "naive":
+            best = max(best, sp if ok else 1.0)
+            if not ok:
+                notes.append(f"- {lv}: final return {m:.1f} [{lo:.1f}, {hi:.1f}] is below naive's mean {base_ret:.1f}: DEGRADED")
+            elif np.isfinite(lo) and abs(m - base_ret) > 0.05 * abs(base_ret):
+                notes.append(f"- {lv}: final return {m:.1f} [{lo:.1f}, {hi:.1f}] differs from naive ({base_ret:.1f}) by "
+                             f"{(m - base_ret) / abs(base_ret):+.0%}, within noise (CI reaches naive's mean)")
+        rows.append(f"| {lv} | {tp:,.0f} | {sp:.1f}x | {_fmt(m, lo, hi)} | {g.solved.sum()}/{len(g)} | {_fmt(w, wlo, whi)} | "
+                    f"{'ok' if ok else 'DEGRADED'} |")
+    out = ["| level | planner steps/s | vs naive | final return | solved | wall-clock to τ (s) | returns |",
+           "|---|---|---|---|---|---|---|", *rows, ""]
+    out += notes or ["- no level's final return differs from naive by more than 5%"]
+    met = best >= 3.0
+    out.append(f"\n**Gate 3: {'MET' if met else 'NOT MET'}**: best non-degraded level reaches {best:.1f}x naive planner "
+               f"throughput (target 3x).")
+    return "\n".join(out)
 
 
 def gate_markdown(s: pd.DataFrame, easy: str = "cartpole", loco: str = "ant") -> str:
@@ -444,6 +493,10 @@ def main():
         gate = gate_markdown(s)
         (out_dir / "gate_step2.md").write_text(gate + "\n", encoding="utf-8")
         print(gate + "\n")
+    g3 = gate_step3(df) if not suffix else None
+    if g3:
+        (out_dir / "gate_step3.md").write_text(g3 + "\n", encoding="utf-8")
+        print(g3 + "\n")
     if suffix:
         md = f"Threshold: tau = {a.tau_frac:g} x PPO final return\n\n" + md
     (out_dir / f"summary{suffix}.md").write_text(md + "\n", encoding="utf-8")

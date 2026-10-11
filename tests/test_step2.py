@@ -97,7 +97,7 @@ def test_reporter_schema_cap_and_tau(tmp_path):
 class _PerfectModel(torch.nn.Module):
     E = 5
 
-    def predict(self, obs, act, sample=True):
+    def predict(self, obs, act, sample=True, eps=None):
         return obs + act
 
 
@@ -345,3 +345,32 @@ def test_pets_batched_end_to_end(tmp_path):
     rows = _rows(logger)
     assert rows and rows[-1]["impl"] == "batched" and all(set(COMMON_KEYS) <= set(r) for r in rows)
     assert any(r.get("pets/model_train_steps") for r in rows)
+
+
+# ---------------------------------------------------------------------------------------------- step 3 (CPU)
+def test_noise_hook_naive_vs_batched_planners_agree():
+    """Same weights + same external noise -> the naive and batched planners produce the same actions."""
+    from gpubench.algos.pets.ensemble_batched import BatchedEnsemble
+
+    torch.manual_seed(0)
+    naive = NaiveEnsemble(4, 1, ensemble_size=5, hidden=16, layers=2)
+    batched = BatchedEnsemble(4, 1, ensemble_size=5, hidden=16, layers=2).load_from_naive(naive)
+    cost = make_cost("cartpole", CARTPOLE_CFG)
+    kw = dict(horizon=6, samples=20, iterations=2, noise_std=0.4, action_repeat=3)
+    pn, pb = NaiveMPPI(naive, cost, 3, 1, "cpu", **kw), NaiveMPPI(batched, cost, 3, 1, "cpu", **kw)
+    obs = torch.randn(3, 4) * 0.2
+    for step in range(4):
+        g = torch.Generator().manual_seed(step)
+        noise = {"act": [torch.randn(3, 20, 2, 1, generator=g) for _ in range(2)],
+                 "model": [[torch.randn(5, 12, 4, generator=g) for _ in range(6)] for _ in range(2)]}
+        torch.testing.assert_close(pn.plan(obs, noise=noise), pb.plan(obs, noise=noise), atol=1e-5, rtol=1e-5)
+
+
+def test_build_planner_dispatch():
+    from gpubench.algos.pets.run import ENSEMBLES, IMPL_LEVELS, build_planner
+
+    assert set(IMPL_LEVELS) == set(ENSEMBLES)
+    naive = NaiveEnsemble(4, 1, ensemble_size=5, hidden=8, layers=1)
+    mp = {"horizon": 6, "samples": 20, "particles": 1, "iterations": 1, "temperature": 0.5, "noise_std": 0.3}
+    p = build_planner("batched", naive, make_cost("cartpole", CARTPOLE_CFG), 2, 1, "cpu", mp)
+    assert isinstance(p, NaiveMPPI)

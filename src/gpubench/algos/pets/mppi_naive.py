@@ -68,8 +68,9 @@ class NaiveMPPI:
             self.mean.mul_((~env_mask).to(self.mean.dtype).view(-1, 1, 1))
 
     @torch.no_grad()
-    def evaluate(self, obs: torch.Tensor, actions: torch.Tensor) -> torch.Tensor:
-        """obs [B, do], actions [B, K, H, A] -> expected return [B, K]"""
+    def evaluate(self, obs: torch.Tensor, actions: torch.Tensor, model_noise=None) -> torch.Tensor:
+        """obs [B, do], actions [B, K, H, A] -> expected return [B, K]
+        model_noise: optional per-step standard-normal noise [H][E, N, do] (equivalence tests)."""
         B, K, H, A = actions.shape
         P = self.P
         s = obs[:, None, :].expand(B, K * P, obs.shape[-1])
@@ -80,7 +81,7 @@ class NaiveMPPI:
         alive = torch.ones_like(ret)
         for t in range(H):  # <- the naive part (H x E small launches)
             a_t = a_all[:, :, t]
-            s_next = self.model.predict(s, a_t)
+            s_next = self.model.predict(s, a_t, eps=None if model_noise is None else model_noise[t])
             r, term = self.cost_fn(s, a_t, s_next)
             ret = ret + alive * r
             alive = alive * (~term).to(alive.dtype)
@@ -99,14 +100,17 @@ class NaiveMPPI:
         return fine
 
     @torch.no_grad()
-    def plan(self, obs: torch.Tensor) -> torch.Tensor:
-        """obs [B, do] -> action [B, A]; warm-starts from the previous plan."""
+    def plan(self, obs: torch.Tensor, noise: dict | None = None) -> torch.Tensor:
+        """obs [B, do] -> action [B, A]; warm-starts from the previous plan.
+        noise: optional {"act": [iters][B, K, Hc, A], "model": [iters][H][E, N, do]} standard-normal draws
+        (equivalence tests across the ablation levels; None = draw internally)."""
         sigma = self.sigma
-        for _ in range(self.iters):
-            eps = torch.randn(self.B, self.K, self.Hc, self.A, device=self.device) * sigma
+        for i in range(self.iters):
+            raw = noise["act"][i] if noise is not None else torch.randn(self.B, self.K, self.Hc, self.A, device=self.device)
+            eps = raw * sigma
             eps[:, 0] = 0.0  # always evaluate the current mean sequence
             coarse = (self.mean[:, None] + eps).clamp(self.lo, self.hi)
-            R = self.evaluate(obs, self._to_fine(coarse))  # [B, K]
+            R = self.evaluate(obs, self._to_fine(coarse), None if noise is None else noise["model"][i])  # [B, K]
             z = (R - R.max(dim=1, keepdim=True).values) / (self.lam * (R.std(dim=1, keepdim=True) + 1e-6))
             w = torch.softmax(z, dim=1)  # scale-free temperature: lam in units of return std
             self.mean = (w[:, :, None, None] * coarse).sum(1)

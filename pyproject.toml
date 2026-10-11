@@ -36,6 +36,7 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = ["gpu: needs CUDA + Triton; runs on the instance (pytest -m gpu), skipped elsewhere"]
 
 [tool.ruff]
 line-length = 120

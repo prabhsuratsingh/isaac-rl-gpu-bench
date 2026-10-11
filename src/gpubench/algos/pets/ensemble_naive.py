@@ -66,12 +66,13 @@ class NaiveEnsemble(nn.Module):
         x = (torch.cat([obs, act], -1) - self.in_mean) / self.in_std
         return self.members[i](x)
 
-    def predict(self, obs: torch.Tensor, act: torch.Tensor, sample: bool = True) -> torch.Tensor:
+    def predict(self, obs: torch.Tensor, act: torch.Tensor, sample: bool = True, eps: torch.Tensor | None = None) -> torch.Tensor:
         """obs [E, N, do], act [E, N, da] -> next_obs [E, N, do]; member i propagates obs[i]."""
         outs = []
         for i in range(self.E):  # <- the naive part
             mean, logvar = self._member(i, obs[i], act[i])
-            delta_n = mean + torch.randn_like(mean) * (0.5 * logvar).exp() if sample else mean
+            noise = torch.randn_like(mean) if eps is None else eps[i]
+            delta_n = mean + noise * (0.5 * logvar).exp() if sample else mean
             outs.append(obs[i] + delta_n * self.out_std + self.out_mean)
         nxt = torch.stack(outs, 0)
         if self.action_obs_slice is not None:  # obs contains the last action: known exactly, don't predict it

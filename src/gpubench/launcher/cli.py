@@ -444,6 +444,9 @@ def cmd_exp(a):
             st = _wait_exp(rem, exp, deadline=deadline, inst_id=inst_id)
             failed |= st["state"] == "failed"
             _pull(inst_id, inst, rem)  # pull after every exp so nothing is lost if a later one hangs
+            if st["state"] == "failed" and expand(f).get("stop_session_on_fail"):
+                print(f"{exp} failed and is marked stop_session_on_fail: skipping the remaining experiment files")
+                break
         code = 1 if failed else 0
     except KeyboardInterrupt:
         print("\ninterrupted")

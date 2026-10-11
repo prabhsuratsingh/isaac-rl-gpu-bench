@@ -1,0 +1,7 @@
+# Step-3 planner microbenchmark (no simulator, ~5-10 min): every level at the tuned PETS-Cartpole planner
+# and at Ant sizes, sweeps over E, samples x horizon and envs, vmap/torch.compile references, FP8 probe.
+name: bench_planner
+timeout_min: 40
+jobs:
+  - name: planner
+    cmd: python scripts/bench_planner.py --out results/bench/planner.json

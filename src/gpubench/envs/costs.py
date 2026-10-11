@@ -38,6 +38,8 @@ def make_cartpole(cfg) -> CostFn:
         r = alive * (1.0 - t) + term_s * t + pole_pos_s * pole_pos.square() + cart_vel_s * cart_vel.abs() + pole_vel_s * pole_vel.abs()
         return r, terminated
 
+    # constants exposed for the fused Triton planner step (algos/pets/triton_kernels.py)
+    fn.kind, fn.params = "cartpole", (alive, term_s, pole_pos_s, cart_vel_s, pole_vel_s, max_cart)
     return fn
 
 
@@ -73,6 +75,7 @@ def make_ant(cfg) -> CostFn:
         r = torch.where(terminated, torch.full_like(r, death_cost), r)
         return r, terminated
 
+    fn.kind, fn.params = "ant", (heading_w, up_w, act_cost_s, energy_s, alive_s, death_cost, term_h, decimation)
     return fn
 
 

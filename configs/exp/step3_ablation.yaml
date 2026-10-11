@@ -1,0 +1,22 @@
+# Step-3 end-to-end ablation: PETS on Cartpole with the TUNED naive hyperparameters at every systems level,
+# so only the implementation changes. Fixed data budget (40k env steps, no wall cap): every level sees
+# the same number of samples, so learning curves are directly comparable ("returns not degraded"),
+# and wall-clock to tau from the same runs is the systems headline.
+name: step3_ablation
+timeout_min: 30
+jobs:
+  - name: naive
+    matrix: {algo: [pets_naive], task: [cartpole], seed: [0, 1, 2]}
+    overrides: {tuned: true, algo.impl: naive, algo.total_env_steps: 40000, algo.max_wall_s: null}
+  - name: batched
+    matrix: {algo: [pets_naive], task: [cartpole], seed: [0, 1, 2]}
+    overrides: {tuned: true, algo.impl: batched, algo.total_env_steps: 40000, algo.max_wall_s: null}
+  - name: fused
+    matrix: {algo: [pets_naive], task: [cartpole], seed: [0, 1, 2]}
+    overrides: {tuned: true, algo.impl: fused, algo.total_env_steps: 40000, algo.max_wall_s: null}
+  - name: graph
+    matrix: {algo: [pets_naive], task: [cartpole], seed: [0, 1, 2]}
+    overrides: {tuned: true, algo.impl: graph, algo.total_env_steps: 40000, algo.max_wall_s: null}
+  - name: bf16
+    matrix: {algo: [pets_naive], task: [cartpole], seed: [0, 1, 2]}
+    overrides: {tuned: true, algo.impl: bf16, algo.total_env_steps: 40000, algo.max_wall_s: null}

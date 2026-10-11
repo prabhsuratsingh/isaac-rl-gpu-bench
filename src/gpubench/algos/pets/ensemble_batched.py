@@ -67,9 +67,10 @@ class BatchedEnsemble(nn.Module):
         logvar = self.min_logvar + F.softplus(logvar - self.min_logvar)
         return mean, logvar
 
-    def predict(self, obs: torch.Tensor, act: torch.Tensor, sample: bool = True) -> torch.Tensor:
+    def predict(self, obs: torch.Tensor, act: torch.Tensor, sample: bool = True, eps: torch.Tensor | None = None) -> torch.Tensor:
         mean, logvar = self._forward(obs, act)
-        delta_n = mean + torch.randn_like(mean) * (0.5 * logvar).exp() if sample else mean
+        noise = torch.randn_like(mean) if eps is None else eps
+        delta_n = mean + noise * (0.5 * logvar).exp() if sample else mean
         nxt = obs + delta_n * self.out_std + self.out_mean
         if self.action_obs_slice is not None:
             nxt = nxt.clone()

@@ -1,0 +1,26 @@
+# Step-3 Nsight profiles: one per systems level, same tuned PETS-Cartpole config and the same window
+# (env iterations 150-350: after the first model fit, so the planner is active; CUDA-graph capture
+# happens on the first planned step, before the window).
+name: step3_profile
+timeout_min: 30
+jobs:
+  - kind: profile
+    name: naive
+    matrix: {algo: [pets_naive], task: [cartpole], seed: [0]}
+    overrides: {tuned: true, algo.impl: naive, profile.start: 150, profile.length: 200}
+  - kind: profile
+    name: batched
+    matrix: {algo: [pets_naive], task: [cartpole], seed: [0]}
+    overrides: {tuned: true, algo.impl: batched, profile.start: 150, profile.length: 200}
+  - kind: profile
+    name: fused
+    matrix: {algo: [pets_naive], task: [cartpole], seed: [0]}
+    overrides: {tuned: true, algo.impl: fused, profile.start: 150, profile.length: 200}
+  - kind: profile
+    name: graph
+    matrix: {algo: [pets_naive], task: [cartpole], seed: [0]}
+    overrides: {tuned: true, algo.impl: graph, profile.start: 150, profile.length: 200}
+  - kind: profile
+    name: bf16
+    matrix: {algo: [pets_naive], task: [cartpole], seed: [0]}
+    overrides: {tuned: true, algo.impl: bf16, profile.start: 150, profile.length: 200}

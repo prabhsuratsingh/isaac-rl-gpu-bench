@@ -139,6 +139,11 @@ bash scripts/profile.sh <name> algo=<a> task=<t> seed=0 profile.start=<i0> profi
 ## 9. Change log
 
 - v0.1: initial protocol (step 1).
+- v0.7 (2026-10-11): step-3 systems ablation for PETS, selected by `algo.impl` with identical hyperparameters (the tuned naive PETS-Cartpole config):
+  - The levels are naive -> batched -> fused (hand-written Triton step kernel: log-variance bounding, in-kernel Philox sampling, de-normalisation, task reward/termination, return accumulation, next-input write; first-layer normalisation folded into the weights) -> graph (whole plan() as CUDA graphs, one per action-repeat phase) -> bf16 (planning GEMMs in bf16). FP8 is probed in the microbenchmark only.
+  - **Equivalence:** levels must agree on identical external noise (`tests/test_gpu.py`; fp32 within 2e-4 on actions, bf16 within 1% on returns). End-to-end runs use a **fixed data budget** (40k env steps, no wall cap), so learning curves are comparable.
+  - **Gate 3:** at least 3x naive planner throughput (median `planner_steps_per_s`) at a level whose final-return CI still reaches naive's mean.
+  - The fused/graph levels draw their noise in-kernel, so they are statistically, not bitwise, equal to the torch levels.
 - v0.6 result (2026-10-10): batched PETS gets 2.4x more Ant data in the same budget (1.39M vs 0.59M steps) but the same return (1,020 vs 1,070); its model error floor does not move. PETS on locomotion is dropped for good; MBPO is the locomotion contender. The batched ensemble becomes level 1 of the step-3 ablation.
 - v0.6 (2026-10-09): PETS retry on Ant (step 2c). Adds the batched ensemble (`impl: batched`, one baddbmm per layer for all members), holdout early stopping for model training (its scalar checks sync only inside the model_train phase, never in the act loop), and an optional CEM-style elite refit in MPPI. Its tuning round (8 trials, same caps) is recorded as PETS-only extra development effort.
 - v0.5 (2026-10-08), step-2 gate decision: on locomotion the model-based contender may be MBPO instead of PETS (mirror of the original "drop MBPO if it struggles" rule). Result: Cartpole all three learn; Ant: PPO and MBPO learn, PETS reaches 1,070 against the 1,667 bar, limited by naive speed. PETS stays on Cartpole and is re-tested on Ant after the systems optimisations (same wall budget, more steps/s).

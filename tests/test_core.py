@@ -134,7 +134,7 @@ class _PerfectModel(torch.nn.Module):
 
     E = 5
 
-    def predict(self, obs, act, sample=True):
+    def predict(self, obs, act, sample=True, eps=None):
         return obs + act
 
 

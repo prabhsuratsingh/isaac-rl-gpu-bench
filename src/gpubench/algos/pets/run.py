@@ -37,7 +37,10 @@ def sync_guard(mode: str | int):
         torch.cuda.set_sync_debug_mode(prev)
 
 
-ENSEMBLES = {"naive": NaiveEnsemble, "batched": BatchedEnsemble}
+# step-3 ablation levels (cumulative): which ensemble each level uses; the planner is chosen in build_planner
+IMPL_LEVELS = ("naive", "batched", "fused", "graph", "bf16")
+ENSEMBLES = {"naive": NaiveEnsemble, "batched": BatchedEnsemble, "fused": BatchedEnsemble, "graph": BatchedEnsemble,
+             "bf16": BatchedEnsemble}
 
 
 def build_model(m: dict, obs_dim: int, act_dim: int, cost_kind: str, device, impl: str = "naive"):
@@ -47,6 +50,25 @@ def build_model(m: dict, obs_dim: int, act_dim: int, cost_kind: str, device, imp
                             ACTION_OBS_SLICES.get(cost_kind)).to(device)
     opt = torch.optim.Adam(model.parameters(), lr=m["lr"], weight_decay=m.get("weight_decay", 0.0))
     return model, opt
+
+
+def build_planner(impl: str, model, cost_fn, num_envs: int, act_dim: int, device, mp: dict):
+    """naive/batched -> NaiveMPPI (torch ops); fused -> FusedMPPI (Triton step kernels);
+    graph -> fused captured as CUDA graphs; bf16 -> graph with bf16 planning GEMMs."""
+    kw = dict(horizon=mp["horizon"], samples=mp["samples"], particles=mp["particles"], iterations=mp["iterations"],
+              temperature=mp["temperature"], noise_std=mp["noise_std"], action_repeat=mp.get("action_repeat", 1),
+              noise_decay=mp.get("noise_decay", 1.0), elite_frac=mp.get("elite_frac"), min_std=mp.get("min_std", 0.05))
+    if impl in ("naive", "batched"):
+        return NaiveMPPI(model, cost_fn, num_envs, act_dim, device, **kw)
+    from .mppi_fused import FusedMPPI  # Triton: imported only when used (not available on CPU-only hosts)
+
+    dtype = torch.bfloat16 if impl == "bf16" else torch.float32
+    planner = FusedMPPI(model, cost_fn, num_envs, act_dim, device, dtype=dtype, **kw)
+    if impl == "fused":
+        return planner
+    from .graphs import GraphedPlanner
+
+    return GraphedPlanner(planner)
 
 
 def train_model(model, opt, buf: GpuReplayBuffer, steps: int, batch: int, early_stop: dict | None = None):
@@ -125,11 +147,7 @@ def run(cfg: dict, logger, venv, env_cfg, timer):
 
     model, opt = build_model(a["model"], do, da, cost_kind, device, a.get("impl", "naive"))
     mp = a["mppi"]
-    planner = NaiveMPPI(model, cost_fn, B, da, device, horizon=mp["horizon"], samples=mp["samples"],
-                        particles=mp["particles"], iterations=mp["iterations"], temperature=mp["temperature"],
-                        noise_std=mp["noise_std"], action_repeat=mp.get("action_repeat", 1),
-                        noise_decay=mp.get("noise_decay", 1.0), elite_frac=mp.get("elite_frac"),
-                        min_std=mp.get("min_std", 0.05))
+    planner = build_planner(a.get("impl", "naive"), model, cost_fn, B, da, device, mp)
     buf = GpuReplayBuffer(a["buffer_capacity"], do, da, device)
     rep = Reporter.from_cfg(cfg, logger, timer, "pets", B)
 
