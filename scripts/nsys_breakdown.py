@@ -69,7 +69,10 @@ def from_sqlite(db: Path) -> dict:
     ranges = ranges[ranges.phase.isin(PHASES)].sort_values("start")
     rt = pd.read_sql("select start, globalTid as tid, correlationId from CUPTI_ACTIVITY_KIND_RUNTIME", con).sort_values("start")
     acts = [pd.read_sql(f"select start, end, correlationId from {t}", con)
-            for t in ("CUPTI_ACTIVITY_KIND_KERNEL", "CUPTI_ACTIVITY_KIND_MEMCPY", "CUPTI_ACTIVITY_KIND_MEMSET") if t in tables]
+            # GRAPH_TRACE: with nsys' default --cuda-graph-trace=graph, a CUDA-graph replay is one activity
+            # (not its kernels), correlated with the cudaGraphLaunch call made inside the phase range.
+            for t in ("CUPTI_ACTIVITY_KIND_KERNEL", "CUPTI_ACTIVITY_KIND_MEMCPY", "CUPTI_ACTIVITY_KIND_MEMSET",
+                      "CUPTI_ACTIVITY_KIND_GRAPH_TRACE") if t in tables]
     gpu = pd.concat(acts, ignore_index=True)
     con.close()
 

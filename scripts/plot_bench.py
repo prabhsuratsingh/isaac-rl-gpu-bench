@@ -94,28 +94,44 @@ def main():
     plt.close(fig)
 
     # ---- latency vs E and vs K*H -----------------------------------------------------------------
-    for key, xlab, fname, filt in (
-        ("E", "ensemble size E", "bench_latency_vs_E.png", lambda r: r.get("H") == 36 and r.get("B") == 32 and r.get("r") == 3),
-        ("KH", "samples x horizon (model steps per sequence batch)", "bench_latency_vs_KH.png",
-         lambda r: r.get("E") == 5 and r.get("B") == 32 and r.get("r") == 1),
-    ):
-        fig, ax = plt.subplots(figsize=(6.5, 4), constrained_layout=True)
-        for lv in LEVELS:
-            pts = sorted({(r["K"] * r["H"] if key == "KH" else r["E"], r["p50_ms"]) for r in runs
-                          if r["task"] == "cartpole" and r["level"] == lv and "error" not in r and filt(r)})
-            if len(pts) < 2:
-                continue
+    # latency vs ensemble size: a line per level (E is a genuine numeric axis)
+    fig, ax = plt.subplots(figsize=(6.5, 4), constrained_layout=True)
+    for lv in LEVELS:
+        pts = sorted({(r["E"], r["p50_ms"]) for r in runs if r["task"] == "cartpole" and r["level"] == lv
+                      and "error" not in r and r.get("H") == 36 and r.get("B") == 32 and r.get("r") == 3})
+        if len(pts) >= 2:
             x, y = zip(*pts)
             ax.plot(x, y, marker="o", markersize=5, color=LEVEL_COLOR[lv], label=lv)
-        ax.set_yscale("log")
-        if key == "KH":
-            ax.set_xscale("log")
-        ax.set_xlabel(xlab)
-        ax.set_ylabel("plan() latency, p50 (ms, log)")
-        ax.set_title(f"Planner latency vs {xlab.split(' (')[0]} — Cartpole, {gpu}", loc="left")
-        ax.legend(ncol=3, fontsize=9)
-        fig.savefig(out / fname, dpi=200)
-        plt.close(fig)
+    ax.set_yscale("log")
+    ax.set_xticks([1, 3, 5, 7])
+    ax.set_xlabel("ensemble size E")
+    ax.set_ylabel("plan() latency, p50 (ms, log)")
+    ax.set_title(f"Planner latency vs ensemble size — Cartpole, {gpu}", loc="left")
+    ax.legend(ncol=3, fontsize=9)
+    fig.savefig(out / "bench_latency_vs_E.png", dpi=200)
+    plt.close(fig)
+
+    # latency per (samples, horizon) configuration: grouped bars. K x H is not one numeric axis -- latency
+    # of the launch-bound levels follows the horizon (launches per plan), not the number of model steps.
+    sel = [r for r in runs if r["task"] == "cartpole" and "error" not in r and r.get("E") == 5 and r.get("B") == 32
+           and r.get("r") == 1 and r["level"] in LEVELS]
+    cfgs = sorted({(r["K"], r["H"]) for r in sel}, key=lambda kh: (kh[0] * kh[1], kh[1]))
+    fig, ax = plt.subplots(figsize=(8, 4), constrained_layout=True)
+    width = 0.8 / len(LEVELS)
+    for j, lv in enumerate(LEVELS):
+        lat = {(r["K"], r["H"]): r["p50_ms"] for r in sel if r["level"] == lv}
+        xs = [i + (j - (len(LEVELS) - 1) / 2) * width for i in range(len(cfgs))]
+        ax.bar(xs, [lat.get(c, np.nan) for c in cfgs], width=width, color=LEVEL_COLOR[lv], label=lv,
+               edgecolor="#fcfcfb", linewidth=1)
+    ax.set_xticks(range(len(cfgs)), [f"K={k}\nH={h}" for k, h in cfgs])
+    ax.set_yscale("log")
+    ax.set_ylabel("plan() latency, p50 (ms, log)")
+    ax.set_title(f"Planner latency per samples x horizon — Cartpole, E=5, B=32, {gpu}", loc="left")
+    ax.grid(axis="x", visible=False)
+    ax.legend(ncol=5, fontsize=9, loc="upper left")
+    ax.margins(y=0.15)
+    fig.savefig(out / "bench_latency_vs_KH.png", dpi=200)
+    plt.close(fig)
 
     md, tex = table(runs)
     fp8 = d.get("fp8_probe", {})

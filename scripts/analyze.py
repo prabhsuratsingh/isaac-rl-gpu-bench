@@ -76,6 +76,21 @@ def host_cpu(run: dict, gpu_dir: Path) -> str | None:
     return None
 
 
+def _planner_rate(rows) -> float | None:
+    """Median planner steps/s over log rows, re-derived with time = max(host, GPU) ms for the plan phase.
+    Rows logged before the reporter fix used host time only, which undercounts asynchronous (CUDA-graph)
+    planning; their rate is rescaled by host / max(host, gpu)."""
+    vals = []
+    for x in rows:
+        ps = x.get("planner_steps_per_s")
+        if not ps:
+            continue
+        h = (x.get("host_ms") or {}).get("plan", 0.0)
+        g = (x.get("gpu_ms") or {}).get("plan", 0.0)
+        vals.append(ps * h / max(h, g) if h > 0 and g > h else ps)
+    return float(np.median(vals)) if vals else None
+
+
 def final_reward(rows, k=5):
     r = [x["reward_mean"] for x in rows if x.get("reward_mean") is not None]
     return float(np.mean(r[-k:])) if r else np.nan
@@ -128,8 +143,7 @@ def run_table(runs, thresholds, gpu_dir: Path | None = None) -> pd.DataFrame:
             "gpu_h_to_tau": wall_tau / 3600 if wall_tau is not None else None,
             "usd_to_tau": wall_tau / 3600 * dph if (wall_tau is not None and dph) else None,
             "env_steps_per_s": float(np.median(sps)) if sps else None,
-            "planner_steps_per_s": float(np.median([x["planner_steps_per_s"] for x in rows if x.get("planner_steps_per_s")]))
-            if any(x.get("planner_steps_per_s") for x in rows) else None,
+            "planner_steps_per_s": _planner_rate(rows),
             "model_rollouts_per_s": float(np.median([x["model_rollouts_per_s"] for x in rows if x.get("model_rollouts_per_s")]))
             if any(x.get("model_rollouts_per_s") for x in rows) else None,
             "gpu": (r["meta"].get("sys", {}).get("gpu", {}) or {}).get("name"),
@@ -184,8 +198,9 @@ def gate_step3(df: pd.DataFrame, task: str = "cartpole") -> str | None:
     rows, notes = [], []
     base = d[d.level == "naive"]
     base_tp = float(base.planner_steps_per_s.mean())
-    base_ret = float(base.final_reward.mean())
+    base_ret = base.final_reward.to_numpy(dtype=float)
     best = 1.0
+    rng = np.random.default_rng(0)
     for lv in SYSTEM_LEVELS:
         g = d[d.level == lv]
         if g.empty:
@@ -194,18 +209,25 @@ def gate_step3(df: pd.DataFrame, task: str = "cartpole") -> str | None:
         m, lo, hi = bootstrap_ci(g.final_reward.tolist())
         w, wlo, whi = bootstrap_ci(g.wall_to_tau_s.tolist())
         sp = tp / base_tp
-        ok = lv == "naive" or not np.isfinite(hi) or hi >= base_ret
+        ok, diff_txt = True, ""
         if lv != "naive":
+            # two-sample bootstrap CI of the mean difference (level - naive) in final return
+            x = g.final_reward.to_numpy(dtype=float)
+            diffs = rng.choice(x, (10000, len(x))).mean(1) - rng.choice(base_ret, (10000, len(base_ret))).mean(1)
+            dlo, dhi = np.quantile(diffs, [0.025, 0.975])
+            dm = x.mean() - base_ret.mean()
+            ok = dhi >= 0  # degraded only if significantly worse than naive
+            diff_txt = f"{dm:+.1f} [{dlo:+.1f}, {dhi:+.1f}]"
             best = max(best, sp if ok else 1.0)
             if not ok:
-                notes.append(f"- {lv}: final return {m:.1f} [{lo:.1f}, {hi:.1f}] is below naive's mean {base_ret:.1f}: DEGRADED")
-            elif np.isfinite(lo) and abs(m - base_ret) > 0.05 * abs(base_ret):
-                notes.append(f"- {lv}: final return {m:.1f} [{lo:.1f}, {hi:.1f}] differs from naive ({base_ret:.1f}) by "
-                             f"{(m - base_ret) / abs(base_ret):+.0%}, within noise (CI reaches naive's mean)")
-        rows.append(f"| {lv} | {tp:,.0f} | {sp:.1f}x | {_fmt(m, lo, hi)} | {g.solved.sum()}/{len(g)} | {_fmt(w, wlo, whi)} | "
-                    f"{'ok' if ok else 'DEGRADED'} |")
-    out = ["| level | planner steps/s | vs naive | final return | solved | wall-clock to τ (s) | returns |",
-           "|---|---|---|---|---|---|---|", *rows, ""]
+                notes.append(f"- {lv}: final return {dm:+.1f} vs naive, 95% CI [{dlo:+.1f}, {dhi:+.1f}] excludes 0: DEGRADED")
+            elif abs(dm) > 0.05 * abs(base_ret.mean()):
+                notes.append(f"- {lv}: final return {dm:+.1f} vs naive (CI [{dlo:+.1f}, {dhi:+.1f}] includes 0): "
+                             f"not significant with n={len(x)} vs {len(base_ret)} seeds")
+        rows.append(f"| {lv} | {tp:,.0f} | {sp:.1f}x | {_fmt(m, lo, hi)} | {diff_txt or '—'} | {g.solved.sum()}/{len(g)} | "
+                    f"{_fmt(w, wlo, whi)} | {'ok' if ok else 'DEGRADED'} |")
+    out = ["| level | planner steps/s | vs naive | final return | Δ return vs naive [95% CI] | solved | wall-clock to τ (s) | returns |",
+           "|---|---|---|---|---|---|---|---|", *rows, ""]
     out += notes or ["- no level's final return differs from naive by more than 5%"]
     met = best >= 3.0
     out.append(f"\n**Gate 3: {'MET' if met else 'NOT MET'}**: best non-degraded level reaches {best:.1f}x naive planner "

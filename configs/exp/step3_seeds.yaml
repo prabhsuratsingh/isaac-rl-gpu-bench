@@ -1,0 +1,20 @@
+# Step 3 follow-up: seeds 3-9 for each systems level (10 seeds total with step3_ablation), to settle
+# whether the ~5% lower final return of fused/bf16 vs naive (3 seeds each) is real or seed noise. The
+# planners are numerically equivalent on identical noise (tests/test_gpu.py), so any real difference can
+# only come from the random-number stream (in-kernel Philox vs torch's generator). graph replays fused
+# bit-for-bit (identical returns in step3_ablation), so it is covered by fused.
+name: step3_ablation
+timeout_min: 30
+jobs:
+  - name: naive
+    matrix: {algo: [pets_naive], task: [cartpole], seed: [3, 4, 5, 6, 7, 8, 9]}
+    overrides: {tuned: true, algo.impl: naive, algo.total_env_steps: 40000, algo.max_wall_s: null}
+  - name: batched
+    matrix: {algo: [pets_naive], task: [cartpole], seed: [3, 4, 5, 6, 7, 8, 9]}
+    overrides: {tuned: true, algo.impl: batched, algo.total_env_steps: 40000, algo.max_wall_s: null}
+  - name: fused
+    matrix: {algo: [pets_naive], task: [cartpole], seed: [3, 4, 5, 6, 7, 8, 9]}
+    overrides: {tuned: true, algo.impl: fused, algo.total_env_steps: 40000, algo.max_wall_s: null}
+  - name: bf16
+    matrix: {algo: [pets_naive], task: [cartpole], seed: [3, 4, 5, 6, 7, 8, 9]}
+    overrides: {tuned: true, algo.impl: bf16, algo.total_env_steps: 40000, algo.max_wall_s: null}

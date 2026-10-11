@@ -58,8 +58,11 @@ class Reporter:
                    stop_tau=a.get("stop_tau"))
 
     def rate(self, count: float, phase: str, t: dict) -> float | None:
-        """count / host seconds spent in `phase` during this interval."""
-        s = t["host_ms"].get(phase, 0.0) / 1e3
+        """count / time spent in `phase` during this interval, where time = max(host, GPU-event) ms.
+
+        Host time alone is wrong for asynchronous phases: a CUDA-graph replay returns to Python in ~1 ms
+        while the GPU works for several more (step 3 first reported a 1,873x "speed-up" that way)."""
+        s = max(t["host_ms"].get(phase, 0.0), t["gpu_ms"].get(phase, 0.0)) / 1e3
         return count / s if s > 0 and count else None
 
     def emit(self, env_steps: int, iteration: int, episode_stats: dict, *, timing: dict | None = None,
