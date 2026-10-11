@@ -220,8 +220,8 @@ def gate_step3(df: pd.DataFrame, task: str = "cartpole") -> str | None:
     d = df[(df.task == task) & (df.algo == "pets")].copy()
     d["level"] = d.impl.str.replace("+tuned", "", regex=False)
     d = d[d.level.isin(SYSTEM_LEVELS)]
-    if d.empty or "naive" not in set(d.level):
-        return None
+    if d.empty or "naive" not in set(d.level) or set(d.level) == {"naive"}:
+        return None  # no step-3 ablation levels in this selection
     rows, notes = [], []
     base = d[d.level == "naive"]
     base_tp = float(base.planner_steps_per_s.mean())
