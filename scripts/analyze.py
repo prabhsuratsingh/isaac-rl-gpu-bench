@@ -76,18 +76,19 @@ def host_cpu(run: dict, gpu_dir: Path) -> str | None:
     return None
 
 
-def _planner_rate(rows) -> float | None:
-    """Median planner steps/s over log rows, re-derived with time = max(host, GPU) ms for the plan phase.
-    Rows logged before the reporter fix used host time only, which undercounts asynchronous (CUDA-graph)
-    planning; their rate is rescaled by host / max(host, gpu)."""
+def _planner_rate(rows, num_envs: int | None) -> float | None:
+    """Median planner steps/s over log rows, recomputed from first principles for every row:
+    plan calls x num_envs / max(host, GPU-event) plan time. This is independent of how the logged rate
+    was computed (host-only before the reporter fix, max(host, GPU) after it), so old and new rows mix
+    correctly. Falls back to the logged value when num_envs is unknown."""
     vals = []
     for x in rows:
         ps = x.get("planner_steps_per_s")
         if not ps:
             continue
-        h = (x.get("host_ms") or {}).get("plan", 0.0)
-        g = (x.get("gpu_ms") or {}).get("plan", 0.0)
-        vals.append(ps * h / max(h, g) if h > 0 and g > h else ps)
+        calls = (x.get("calls") or {}).get("plan", 0)
+        t = max((x.get("host_ms") or {}).get("plan", 0.0), (x.get("gpu_ms") or {}).get("plan", 0.0)) / 1e3
+        vals.append(calls * num_envs / t if num_envs and calls and t > 0 else ps)
     return float(np.median(vals)) if vals else None
 
 
@@ -143,7 +144,7 @@ def run_table(runs, thresholds, gpu_dir: Path | None = None) -> pd.DataFrame:
             "gpu_h_to_tau": wall_tau / 3600 if wall_tau is not None else None,
             "usd_to_tau": wall_tau / 3600 * dph if (wall_tau is not None and dph) else None,
             "env_steps_per_s": float(np.median(sps)) if sps else None,
-            "planner_steps_per_s": _planner_rate(rows),
+            "planner_steps_per_s": _planner_rate(rows, r["summary"].get("num_envs")),
             "model_rollouts_per_s": float(np.median([x["model_rollouts_per_s"] for x in rows if x.get("model_rollouts_per_s")]))
             if any(x.get("model_rollouts_per_s") for x in rows) else None,
             "gpu": (r["meta"].get("sys", {}).get("gpu", {}) or {}).get("name"),
