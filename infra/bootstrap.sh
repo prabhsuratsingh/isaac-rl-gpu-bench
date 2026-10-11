@@ -32,7 +32,7 @@ export DEBIAN_FRONTEND=noninteractive
 rm -f /etc/apt/sources.list.d/nvidia-devtools.list  # stale unsigned repo from an older bootstrap version
 apt-get update -qq
 apt-get install -y -qq --no-install-recommends \
-  git curl wget ca-certificates gnupg tmux htop pciutils \
+  git curl wget ca-certificates gnupg tmux htop pciutils build-essential \
   libglu1-mesa libxrender1 libxt6 libxi6 libsm6 libice6 libxrandr2 libxinerama1 libxcursor1 \
   libxkbcommon0 libegl1 libgl1 libvulkan1 vulkan-tools >/dev/null
 
@@ -82,6 +82,9 @@ else
 fi
 python -m pip install -q -e ".[remote]" --no-deps
 python -m pip install -q numpy pandas pytest >/dev/null  # no-ops when already satisfied by the lock
+
+step "sanity: C compiler (Triton builds its launcher stub; torch.compile needs it too)"
+gcc --version | head -1
 
 step "sanity: torch sees the GPU"
 python - <<'EOF'

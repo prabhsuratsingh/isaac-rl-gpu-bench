@@ -364,7 +364,27 @@ def cmd_status(a):
     return 0
 
 
+def _local_logs(a) -> int | None:
+    """After an instance is gone, show the copy `pull` saved under results/<gpu>/_logs (or _instance)."""
+    if a.job:
+        hits = sorted(RESULTS.glob(f"*/_logs/*/{a.job}.log"), key=lambda p: p.stat().st_mtime)
+    elif a.bootstrap:
+        hits = sorted(RESULTS.glob("*/_instance/*/bootstrap.log"), key=lambda p: p.stat().st_mtime)
+    else:
+        return None
+    if not hits:
+        return None
+    lines = hits[-1].read_text(encoding="utf-8", errors="replace").splitlines()
+    print(f"(instance gone; showing the pulled copy {hits[-1].relative_to(I.ROOT)})")
+    print("\n".join(lines[-a.tail:]))
+    return 0
+
+
 def cmd_logs(a):
+    if a.id is None and not I.load_state():
+        rc = _local_logs(a)
+        if rc is not None:
+            return rc
     inst_id, _, rem = _remote(a.id)
     if a.bootstrap:
         path = "/workspace/bootstrap.log"
