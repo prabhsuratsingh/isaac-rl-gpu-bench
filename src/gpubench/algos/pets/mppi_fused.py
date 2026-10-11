@@ -59,24 +59,13 @@ class FusedMPPI(NaiveMPPI):
 
     # ---- model ---------------------------------------------------------------------------------
     def _folded_weights(self):
-        """First layer absorbs (x - in_mean) / in_std; cast to the planning dtype."""
-        m = self.model
-        W, b = list(m.W), list(m.b)
-        inv = 1.0 / m.in_std
-        W0 = W[0] * inv[None, :, None]
-        b0 = b[0] - torch.einsum("i,eio->eo", m.in_mean * inv, W[0]).unsqueeze(1)
-        Ws = [W0] + W[1:]
-        bs = [b0] + b[1:]
-        return [w.to(self.dtype) for w in Ws], [x.to(self.dtype) for x in bs]
+        return self.model.folded_weights(self.dtype)
 
     @staticmethod
     def _head(x, Ws, bs):
-        n = len(Ws)
-        for i in range(n):
-            x = torch.baddbmm(bs[i], x, Ws[i])
-            if i < n - 1:
-                x = torch.nn.functional.silu(x)
-        return x
+        from .ensemble_batched import BatchedEnsemble
+
+        return BatchedEnsemble.head_from_x(x, Ws, bs)
 
     # ---- planning ------------------------------------------------------------------------------
     @torch.no_grad()

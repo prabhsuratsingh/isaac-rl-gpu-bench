@@ -1,0 +1,83 @@
+# MAIN BENCHMARK (cartpole), frozen code (git tag freeze-v1). PPO default + tuned; PETS and MBPO naive + fast
+# with their tuned hyperparameters (naive and fast differ only in the systems layer). 5 seeds, wall-clock budget
+# 300 s per run, steps unlimited. Results: results/<gpu>/main_rtx4090/.
+name: main_cartpole
+timeout_min: 20
+jobs:
+- name: ppo_default_cartpole
+  matrix:
+    algo:
+    - ppo
+    task:
+    - cartpole
+    seed: &id001
+    - 0
+    - 1
+    - 2
+    - 3
+    - 4
+  overrides:
+    run.exp: main_rtx4090
+- name: ppo_tuned_cartpole
+  matrix:
+    algo:
+    - ppo
+    task:
+    - cartpole
+    seed: *id001
+  overrides:
+    run.exp: main_rtx4090
+    tuned: true
+    algo.max_wall_s: 300
+- name: pets_naive_cartpole
+  matrix:
+    algo:
+    - pets_naive
+    task:
+    - cartpole
+    seed: *id001
+  overrides:
+    run.exp: main_rtx4090
+    tuned: true
+    algo.impl: naive
+    algo.max_wall_s: 300
+    algo.total_env_steps: 100000000
+- name: pets_fast_cartpole
+  matrix:
+    algo:
+    - pets_naive
+    task:
+    - cartpole
+    seed: *id001
+  overrides:
+    run.exp: main_rtx4090
+    tuned: true
+    algo.impl: fast
+    algo.max_wall_s: 300
+    algo.total_env_steps: 100000000
+- name: mbpo_naive_cartpole
+  matrix:
+    algo:
+    - mbpo_naive
+    task:
+    - cartpole
+    seed: *id001
+  overrides:
+    run.exp: main_rtx4090
+    tuned: true
+    algo.impl: naive
+    algo.max_wall_s: 300
+    algo.total_env_steps: 100000000
+- name: mbpo_fast_cartpole
+  matrix:
+    algo:
+    - mbpo_naive
+    task:
+    - cartpole
+    seed: *id001
+  overrides:
+    run.exp: main_rtx4090
+    tuned: true
+    algo.impl: fast
+    algo.max_wall_s: 300
+    algo.total_env_steps: 100000000

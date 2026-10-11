@@ -374,3 +374,23 @@ def test_build_planner_dispatch():
     mp = {"horizon": 6, "samples": 20, "particles": 1, "iterations": 1, "temperature": 0.5, "noise_std": 0.3}
     p = build_planner("batched", naive, make_cost("cartpole", CARTPOLE_CFG), 2, 1, "cpu", mp)
     assert isinstance(p, NaiveMPPI)
+
+
+# ---------------------------------------------------------------------------------------------- step 4 (CPU)
+def test_buffer_add_at_ring_and_host_mirror():
+    b = GpuReplayBuffer(5, 2, 1, "cpu")
+    b.add(torch.zeros(2, 2), torch.zeros(2, 1), torch.zeros(2, 2), torch.ones(2, dtype=torch.bool))
+    b.sync_ptr()
+    x = torch.arange(8.0).view(4, 2)
+    b.add_at(x, torch.ones(4, 1), x + 1, torch.ones(4, dtype=torch.bool), torch.zeros(4, dtype=torch.bool), torch.ones(4))
+    b.advance(4)
+    assert b.ptr == 1 and b.size == 5 and int(b.ptr_t) == b.ptr  # 2 + 4 = 6 -> wraps to slot 1
+    assert b.obs[2:5, 0].tolist() == [0.0, 2.0, 4.0] and b.obs[0, 0] == 6.0  # slots 2,3,4 then 0
+
+
+def test_fast_impl_is_registered_for_both_methods():
+    from gpubench.algos.pets.run import ENSEMBLES, IMPL_LEVELS
+
+    assert "fast" in IMPL_LEVELS and ENSEMBLES["fast"].__name__ == "BatchedEnsemble"
+    cfg = load_config({"algo": "mbpo_naive", "task": "ant", "algo.impl": "fast"})
+    assert cfg["algo"]["impl"] == "fast" and cfg["algo"]["rollout_batch"] % cfg["algo"]["model"]["ensemble_size"] == 0

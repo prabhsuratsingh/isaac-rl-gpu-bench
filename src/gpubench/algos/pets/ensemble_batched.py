@@ -94,6 +94,27 @@ class BatchedEnsemble(nn.Module):
         pred = mean.mean(0)
         return ((((pred - target) ** 2).mean(-1)) * w).sum() / w.sum().clamp_min(1.0)
 
+    # ---- inference helpers shared by the fused PETS planner and the fast MBPO rollout -----------------
+    def folded_weights(self, dtype: torch.dtype = torch.float32):
+        """Weights with the input normalisation folded into the first layer:
+        ((x - m) / s) @ W0 + b0 == x @ (W0 / s) + (b0 - (m / s) @ W0). Cast to the inference dtype."""
+        W, b = list(self.W), list(self.b)
+        inv = 1.0 / self.in_std
+        W0 = W[0] * inv[None, :, None]
+        b0 = b[0] - torch.einsum("i,eio->eo", self.in_mean * inv, W[0]).unsqueeze(1)
+        Ws, bs = [W0] + W[1:], [b0] + b[1:]
+        return [w.to(dtype) for w in Ws], [x.to(dtype) for x in bs]
+
+    @staticmethod
+    def head_from_x(x, Ws, bs):
+        """Raw output head [E, N, 2*do] for un-normalised inputs x = [obs | act] (use folded weights)."""
+        n = len(Ws)
+        for i in range(n):
+            x = torch.baddbmm(bs[i], x, Ws[i])
+            if i < n - 1:
+                x = F.silu(x)
+        return x
+
     @torch.no_grad()
     def load_from_naive(self, naive) -> "BatchedEnsemble":
         """Copy weights from a NaiveEnsemble with the same shape (equivalence tests, warm starts)."""

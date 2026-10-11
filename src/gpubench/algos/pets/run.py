@@ -38,9 +38,10 @@ def sync_guard(mode: str | int):
 
 
 # step-3 ablation levels (cumulative): which ensemble each level uses; the planner is chosen in build_planner
-IMPL_LEVELS = ("naive", "batched", "fused", "graph", "bf16")
+IMPL_LEVELS = ("naive", "batched", "fused", "graph", "bf16", "fast")
+# fast = the full stack used in the main benchmark: bf16 graphed planner + CUDA-graphed model training
 ENSEMBLES = {"naive": NaiveEnsemble, "batched": BatchedEnsemble, "fused": BatchedEnsemble, "graph": BatchedEnsemble,
-             "bf16": BatchedEnsemble}
+             "bf16": BatchedEnsemble, "fast": BatchedEnsemble}
 
 
 def build_model(m: dict, obs_dim: int, act_dim: int, cost_kind: str, device, impl: str = "naive"):
@@ -62,13 +63,25 @@ def build_planner(impl: str, model, cost_fn, num_envs: int, act_dim: int, device
         return NaiveMPPI(model, cost_fn, num_envs, act_dim, device, **kw)
     from .mppi_fused import FusedMPPI  # Triton: imported only when used (not available on CPU-only hosts)
 
-    dtype = torch.bfloat16 if impl == "bf16" else torch.float32
+    dtype = torch.bfloat16 if impl in ("bf16", "fast") else torch.float32
     planner = FusedMPPI(model, cost_fn, num_envs, act_dim, device, dtype=dtype, **kw)
     if impl == "fused":
         return planner
     from .graphs import GraphedPlanner
 
     return GraphedPlanner(planner)
+
+
+def build_trainer(impl: str, model, opt, buf: GpuReplayBuffer, m: dict):
+    """Returns train(steps) -> (loss, mse, steps_done). `fast` captures the training step as a CUDA graph."""
+    if impl == "fast":
+        if m.get("early_stop"):
+            raise ValueError("impl=fast trains with a CUDA graph and does not support model.early_stop")
+        from .graphed_train import GraphedTrainer
+
+        trainer = GraphedTrainer(model, buf, m["batch_size"], m["lr"], m.get("weight_decay", 0.0))
+        return trainer.train
+    return lambda steps: train_model(model, opt, buf, steps, m["batch_size"], early_stop_cfg(m))
 
 
 def train_model(model, opt, buf: GpuReplayBuffer, steps: int, batch: int, early_stop: dict | None = None):
@@ -149,6 +162,7 @@ def run(cfg: dict, logger, venv, env_cfg, timer):
     mp = a["mppi"]
     planner = build_planner(a.get("impl", "naive"), model, cost_fn, B, da, device, mp)
     buf = GpuReplayBuffer(a["buffer_capacity"], do, da, device)
+    train = build_trainer(a.get("impl", "naive"), model, opt, buf, a["model"])
     rep = Reporter.from_cfg(cfg, logger, timer, "pets", B)
 
     total_iters = math.ceil(a["total_env_steps"] / B)
@@ -178,7 +192,7 @@ def run(cfg: dict, logger, venv, env_cfg, timer):
                     ridx = buf.recent_idx(train_every * B)
                     holdout = model.eval_mse(*buf.get(ridx))
                 steps = model_train_steps(a["model"], buf.size, first=not trained)
-                loss, mse, done = train_model(model, opt, buf, steps, a["model"]["batch_size"], early_stop_cfg(a["model"]))
+                loss, mse, done = train(steps)
             model_stats = {"model_loss": loss, "model_train_mse": mse, "model_holdout_mse": holdout, "model_train_steps": done}
             trained = True
 

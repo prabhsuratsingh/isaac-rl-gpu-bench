@@ -24,7 +24,7 @@ import math
 import torch
 
 from gpubench.algos.pets.buffer import GpuReplayBuffer
-from gpubench.algos.pets.run import build_model, early_stop_cfg, model_train_steps, sync_guard, train_model
+from gpubench.algos.pets.run import build_model, build_trainer, model_train_steps, sync_guard
 from gpubench.common.reporter import Reporter
 from gpubench.common.timing import ProfilerWindow
 from gpubench.envs.costs import make_cost
@@ -89,6 +89,16 @@ def run(cfg: dict, logger, venv, env_cfg, timer):
     k_max = rollout_length(a["rollout_len"], 10**12)
     model_buf = GpuReplayBuffer(a["rollout_batch"] * max(1, k_max) * a["model_retain_rounds"], do, da, device)
     rep = Reporter.from_cfg(cfg, logger, timer, "mbpo", B)
+    impl = a.get("impl", "naive")
+    if impl not in ("naive", "fast"):
+        raise ValueError(f"MBPO impl must be naive or fast, got {impl!r}")
+    train = build_trainer(impl, model, model_opt, real, m)
+    fast_rollout = updater = None
+    if impl == "fast":  # Triton / CUDA graphs: imported only when used
+        from .rollout_fast import FastRollout
+        from .sac_fast import GraphedSACUpdater
+
+        fast_rollout = FastRollout(model, sac, cost_fn, real, model_buf, a["rollout_batch"])
 
     total_iters = math.ceil(a["total_env_steps"] / B)
     seed_iters = math.ceil(a["seed_steps"] / B)
@@ -118,7 +128,7 @@ def run(cfg: dict, logger, venv, env_cfg, timer):
                 with timer.phase("model_train"):
                     holdout = model.eval_mse(*real.get(real.recent_idx(train_every * B))) if trained else None
                     steps = model_train_steps(m, real.size, first=not trained)
-                    loss, mse, _ = train_model(model, model_opt, real, steps, m["batch_size"], early_stop_cfg(m))
+                    loss, mse, _ = train(steps)
                     sac.set_obs_norm(model.in_mean[:do], model.in_std[:do])
                 stats.update(model_loss=loss, model_train_mse=mse, model_holdout_mse=holdout)
                 trained = True
@@ -126,7 +136,10 @@ def run(cfg: dict, logger, venv, env_cfg, timer):
             if (it - seed_iters) % rollout_every == 0:
                 k = rollout_length(a["rollout_len"], steps_now)
                 with sync_guard(sync_mode), timer.phase("model_rollout"):
-                    n_rollouts += branched_rollout(model, sac, cost_fn, real, model_buf, a["rollout_batch"], k)
+                    if fast_rollout is not None:
+                        n_rollouts += fast_rollout(k)
+                    else:
+                        n_rollouts += branched_rollout(model, sac, cost_fn, real, model_buf, a["rollout_batch"], k)
                 stats["rollout_len"] = k
 
         # ---- act ------------------------------------------------------------------------------
@@ -142,9 +155,15 @@ def run(cfg: dict, logger, venv, env_cfg, timer):
         # ---- policy updates ---------------------------------------------------------------------
         if it >= seed_iters:
             with sync_guard(sync_mode), timer.phase("policy_update"):
-                for _ in range(updates_per_iter):
-                    sac_stats = sac_update(sac, real, model_buf, s["batch_size"], a["real_ratio"])
-            n_updates += updates_per_iter
+                if impl == "fast":
+                    if updater is None:  # after the first rollout: batch composition is static from here
+                        updater = GraphedSACUpdater(sac, real, model_buf, s["batch_size"], a["real_ratio"], updates_per_iter)
+                    n_updates += updater.update()
+                    sac_stats = updater.stats_view()
+                else:
+                    for _ in range(updates_per_iter):
+                        sac_stats = sac_update(sac, real, model_buf, s["batch_size"], a["real_ratio"])
+                    n_updates += updates_per_iter
 
         # ---- log --------------------------------------------------------------------------------
         is_last = it == total_iters - 1

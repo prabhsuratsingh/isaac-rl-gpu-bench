@@ -185,3 +185,119 @@ def test_fused_elite_refit_runs():
     for _ in range(3):
         a = p.plan(obs)
     assert torch.isfinite(a).all() and a.abs().max() <= 1.0
+
+
+# ---------------------------------------------------------------------------------------------- step 4 (MBPO fast)
+def _filled_buffer(do, da, n=4000, cap=None, seed=0):
+    from gpubench.algos.pets.buffer import GpuReplayBuffer
+
+    g = torch.Generator(device=DEV).manual_seed(seed)
+    buf = GpuReplayBuffer(cap or n, do, da, DEV)
+    o = torch.randn(n, do, device=DEV, generator=g) * 0.3
+    a = torch.rand(n, da, device=DEV, generator=g) * 2 - 1
+    buf.add(o, a, o + 0.05 * torch.randn(n, do, device=DEV, generator=g), torch.ones(n, dtype=torch.bool, device=DEV),
+            torch.zeros(n, dtype=torch.bool, device=DEV), torch.randn(n, device=DEV, generator=g))
+    return buf
+
+
+@pytest.mark.parametrize("task", ["cartpole", "ant"])
+def test_graphed_trainer_matches_eager_with_fixed_batch(task):
+    import copy
+
+    from gpubench.algos.pets.graphed_train import GraphedTrainer
+
+    _, batched, cost, do, da = _models(task)
+    twin = copy.deepcopy(batched)
+    buf = _filled_buffer(do, da)
+    idx = torch.randint(0, buf.size, (batched.E, 64), device=DEV)
+    tr = GraphedTrainer(batched, buf, 64, lr=1e-3, weight_decay=1e-5)
+    tr.fixed_idx = idx
+    loss_g, _, done = tr.train(12)  # 3 warmup steps + 9 replays
+    opt = torch.optim.Adam(twin.parameters(), lr=1e-3, weight_decay=1e-5)
+    twin.fit_normalizer(*buf.all()[:4])
+    for _ in range(12):
+        loss, _ = twin.loss(*buf.get(idx))
+        opt.zero_grad(set_to_none=True)
+        loss.backward()
+        opt.step()
+    assert done == 12
+    torch.testing.assert_close(loss_g, loss.detach(), atol=1e-5, rtol=1e-4)
+    for p, q in zip(batched.parameters(), twin.parameters()):
+        torch.testing.assert_close(p, q, atol=1e-5, rtol=1e-4)
+
+
+@pytest.mark.parametrize("task", ["cartpole", "ant"])
+def test_fast_rollout_matches_reference_and_graph_replay(task):
+    from gpubench.algos.mbpo.rollout_fast import FastRollout
+    from gpubench.algos.mbpo.sac import SAC
+    from gpubench.algos.pets.buffer import GpuReplayBuffer
+
+    _, batched, cost, do, da = _models(task)
+    E, n, k = batched.E, 50, 3
+    real = _filled_buffer(do, da, n=200)
+    real.obs[:] = real.obs[0]  # every start state identical -> replays must reproduce the first rollout
+    sac = SAC(do, da, hidden=32, layers=2).to(DEV)
+    mbuf = GpuReplayBuffer(int(n * k * 1.5), do, da, DEV)  # forces ring wrap-around on the 2nd call
+    fr = FastRollout(batched, sac, cost, real, mbuf, n, dtype=torch.float32)
+    g = torch.Generator(device=DEV).manual_seed(3)
+    fr.deterministic_actor = True
+    fr.noise = [torch.randn(E, n // E, do, device=DEV, generator=g) for _ in range(k)]
+    fr.perm = [torch.randperm(n, device=DEV, generator=g) for _ in range(k)]
+    # torch reference with the same permutation / noise / deterministic actor
+    s = real.obs[:n].clone()
+    alive = torch.ones(n, device=DEV)
+    ref = []
+    for t in range(k):
+        a = sac.act(s, deterministic=True)
+        perm = fr.perm[t]
+        sp, ap, alive = s[perm], a[perm], alive[perm]
+        s2 = batched.predict(sp.view(E, -1, do), ap.view(E, -1, da), eps=fr.noise[t]).reshape(n, do)
+        r, term = cost(sp, ap, s2)
+        ref.append((sp, ap, s2, r, term, alive > 0))
+        alive = alive * (~term).float()
+        s = s2
+    assert fr(k) == n * k and mbuf.size == n * k  # first call: eager rollout + capture
+    for t, (sp, ap, s2, r, term, valid) in enumerate(ref):
+        sl = slice(t * n, (t + 1) * n)
+        torch.testing.assert_close(mbuf.obs[sl], sp, atol=1e-4, rtol=1e-4)
+        torch.testing.assert_close(mbuf.next_obs[sl], s2, atol=1e-4, rtol=1e-4)
+        torch.testing.assert_close(mbuf.rew[sl], r, atol=1e-3, rtol=1e-4)
+        assert torch.equal(mbuf.term[sl] > 0.5, term) and torch.equal(mbuf.valid[sl] > 0.5, valid)
+    first = mbuf.next_obs[:n].clone()
+    fr(k)  # graph replay: same states, same noise/perm -> same transitions, written after a wrap-around
+    start = (n * k) % mbuf.capacity
+    wrapped = torch.cat([mbuf.next_obs[start:], mbuf.next_obs[:0]])[:n] if start + n <= mbuf.capacity else None
+    if wrapped is not None:
+        torch.testing.assert_close(wrapped, first, atol=1e-4, rtol=1e-4)
+    assert mbuf.size == mbuf.capacity and mbuf.ptr == (2 * n * k) % mbuf.capacity
+    assert int(mbuf.ptr_t.item()) == mbuf.ptr  # device ring pointer and host mirror agree
+
+
+def test_graphed_sac_updates_learn_and_match_eager_statistically():
+    import copy
+
+    from gpubench.algos.mbpo.sac import SAC
+    from gpubench.algos.mbpo.sac_fast import GraphedSACUpdater
+
+    torch.manual_seed(0)
+    do, da = 4, 1
+    real, mbuf = _filled_buffer(do, da, n=3000, seed=1), _filled_buffer(do, da, n=3000, seed=2)
+    sac = SAC(do, da, hidden=64, layers=2, init_alpha=0.05).to(DEV)
+    twin = copy.deepcopy(sac)
+    up = GraphedSACUpdater(sac, real, mbuf, batch=256, real_ratio=0.25, updates=20)
+    q0 = None
+    for i in range(15):
+        up.update()
+        if i == 1:
+            q0 = up.stats["q_loss"].item()
+    q1 = up.stats["q_loss"].item()
+    assert all(torch.isfinite(p).all() for p in sac.parameters())
+    assert q1 < q0, (q0, q1)
+    assert any(not torch.equal(p, q) for p, q in zip(sac.actor.parameters(), twin.actor.parameters()))
+    # same number of eager updates from the same start: losses should land in the same range
+    from gpubench.algos.mbpo.run import sac_update
+
+    for _ in range(3 + 14 * 20):
+        out = sac_update(twin, real, mbuf, 256, 0.25)
+    print(f"\ngraphed q_loss {q1:.4f} vs eager {out['q_loss'].item():.4f}")
+    assert 0.2 < q1 / max(out["q_loss"].item(), 1e-8) < 5.0

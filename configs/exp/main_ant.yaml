@@ -1,0 +1,83 @@
+# MAIN BENCHMARK (ant), frozen code (git tag freeze-v1). PPO default + tuned; PETS and MBPO naive + fast
+# with their tuned hyperparameters (naive and fast differ only in the systems layer). 5 seeds, wall-clock budget
+# 1200 s per run, steps unlimited. Results: results/<gpu>/main_rtx4090/.
+name: main_ant
+timeout_min: 35
+jobs:
+- name: ppo_default_ant
+  matrix:
+    algo:
+    - ppo
+    task:
+    - ant
+    seed: &id001
+    - 0
+    - 1
+    - 2
+    - 3
+    - 4
+  overrides:
+    run.exp: main_rtx4090
+- name: ppo_tuned_ant
+  matrix:
+    algo:
+    - ppo
+    task:
+    - ant
+    seed: *id001
+  overrides:
+    run.exp: main_rtx4090
+    tuned: true
+    algo.max_wall_s: 1200
+- name: pets_naive_ant
+  matrix:
+    algo:
+    - pets_naive
+    task:
+    - ant
+    seed: *id001
+  overrides:
+    run.exp: main_rtx4090
+    tuned: true
+    algo.impl: naive
+    algo.max_wall_s: 1200
+    algo.total_env_steps: 100000000
+- name: pets_fast_ant
+  matrix:
+    algo:
+    - pets_naive
+    task:
+    - ant
+    seed: *id001
+  overrides:
+    run.exp: main_rtx4090
+    tuned: true
+    algo.impl: fast
+    algo.max_wall_s: 1200
+    algo.total_env_steps: 100000000
+- name: mbpo_naive_ant
+  matrix:
+    algo:
+    - mbpo_naive
+    task:
+    - ant
+    seed: *id001
+  overrides:
+    run.exp: main_rtx4090
+    tuned: true
+    algo.impl: naive
+    algo.max_wall_s: 1200
+    algo.total_env_steps: 100000000
+- name: mbpo_fast_ant
+  matrix:
+    algo:
+    - mbpo_naive
+    task:
+    - ant
+    seed: *id001
+  overrides:
+    run.exp: main_rtx4090
+    tuned: true
+    algo.impl: fast
+    algo.max_wall_s: 1200
+    algo.total_env_steps: 100000000

@@ -1,0 +1,27 @@
+# Step-4 smoke (after gpu_tests): short naive vs fast runs of both model-based methods on both tasks,
+# tuned hyperparameters, 150 s wall cap. Checks the fast stack end to end on the simulator (graph capture
+# inside training, graphed SAC/model training, rollouts) and gives a first naive-vs-fast speed reading.
+name: step4_smoke
+timeout_min: 15
+jobs:
+  - name: pets_naive_cartpole
+    matrix: {algo: [pets_naive], task: [cartpole], seed: [0]}
+    overrides: {tuned: true, algo.impl: naive, algo.max_wall_s: 150, algo.total_env_steps: 100000000}
+  - name: pets_fast_cartpole
+    matrix: {algo: [pets_naive], task: [cartpole], seed: [0]}
+    overrides: {tuned: true, algo.impl: fast, algo.max_wall_s: 150, algo.total_env_steps: 100000000}
+  - name: mbpo_naive_cartpole
+    matrix: {algo: [mbpo_naive], task: [cartpole], seed: [0]}
+    overrides: {tuned: true, algo.impl: naive, algo.max_wall_s: 150, algo.total_env_steps: 100000000}
+  - name: mbpo_fast_cartpole
+    matrix: {algo: [mbpo_naive], task: [cartpole], seed: [0]}
+    overrides: {tuned: true, algo.impl: fast, algo.max_wall_s: 150, algo.total_env_steps: 100000000}
+  - name: pets_fast_ant
+    matrix: {algo: [pets_naive], task: [ant], seed: [0]}
+    overrides: {tuned: true, algo.impl: fast, algo.max_wall_s: 150, algo.total_env_steps: 100000000}
+  - name: mbpo_naive_ant
+    matrix: {algo: [mbpo_naive], task: [ant], seed: [0]}
+    overrides: {tuned: true, algo.impl: naive, algo.max_wall_s: 150, algo.total_env_steps: 100000000}
+  - name: mbpo_fast_ant
+    matrix: {algo: [mbpo_naive], task: [ant], seed: [0]}
+    overrides: {tuned: true, algo.impl: fast, algo.max_wall_s: 150, algo.total_env_steps: 100000000}

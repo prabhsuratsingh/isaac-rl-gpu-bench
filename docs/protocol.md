@@ -139,6 +139,13 @@ bash scripts/profile.sh <name> algo=<a> task=<t> seed=0 profile.start=<i0> profi
 ## 9. Change log
 
 - v0.1: initial protocol (step 1).
+- v0.8 (2026-10-12), step 4:
+  - MBPO `fast` = batched ensemble + CUDA-graphed model training + fast rollouts (TS-1 by random permutation, i.e. each member takes an equal random chunk of particles per step; same marginal member distribution, sampled without replacement) with the PETS Triton step and bf16 GEMMs, captured as CUDA graphs + CUDA-graphed SAC updates (capturable Adam, in-graph minibatch sampling).
+  - PETS `fast` = the step-3 bf16 graphed planner + CUDA-graphed model training.
+  - **Code freeze:** after the step-4 smoke passes, the code is tagged `freeze-v1`. The main benchmark runs at that tag; afterwards only bug fixes, each recorded here with its commit.
+  - **Dreamer is cut:** no RSSM exists, so by the gate-4 rule there is no profiling panel either.
+  - **Main benchmark (`main_cartpole`, `main_ant`):** PPO default + tuned; PETS and MBPO naive + fast with tuned hyperparameters; 5 seeds; wall-clock budget 300 / 1200 s.
+  - **Gate 4:** every must-have cell has 5 completed seeds.
 - v0.7.1 (2026-10-11): throughput rates (`planner_steps_per_s` etc.) use max(host, GPU-event) phase time. Host time alone overstated CUDA-graph levels, whose replay returns to Python ~6 ms before the GPU finishes; old rows are rescaled in analyze.py. The step-3 return check uses a two-sample bootstrap CI of the mean difference vs naive, and a level is degraded only if that CI excludes 0. Nsight breakdowns count CUDA-graph replays (GRAPH_TRACE).
 - v0.7 (2026-10-11): step-3 systems ablation for PETS, selected by `algo.impl` with identical hyperparameters (the tuned naive PETS-Cartpole config):
   - The levels are naive -> batched -> fused (hand-written Triton step kernel: log-variance bounding, in-kernel Philox sampling, de-normalisation, task reward/termination, return accumulation, next-input write; first-layer normalisation folded into the weights) -> graph (whole plan() as CUDA graphs, one per action-repeat phase) -> bf16 (planning GEMMs in bf16). FP8 is probed in the microbenchmark only.

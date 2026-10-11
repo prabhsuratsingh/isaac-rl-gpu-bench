@@ -88,8 +88,10 @@ class SAC(nn.Module):
     def act(self, obs, deterministic: bool = False):
         return self.actor(self._n(obs), deterministic)[0]
 
-    def update(self, obs, act, rew, next_obs, done, w) -> dict:
-        """One gradient step on critic, actor and temperature. All inputs [N, ...] on device; w in {0,1}."""
+    def update(self, obs, act, rew, next_obs, done, w, set_to_none: bool = True) -> dict:
+        """One gradient step on critic, actor and temperature. All inputs [N, ...] on device; w in {0,1}.
+        set_to_none=False keeps gradient tensors alive and zeroes them in place (required inside a CUDA
+        graph, sac_fast.GraphedSACUpdater)."""
         o, no = self._n(obs), self._n(next_obs)
         alpha = self.log_alpha.exp().detach()
         wsum = w.sum().clamp_min(1.0)
@@ -100,19 +102,19 @@ class SAC(nn.Module):
             target = rew + self.gamma * (1.0 - done) * (torch.min(tq1, tq2) - alpha * nlogp)
         q1, q2 = self.critic(o, act)
         q_loss = (((q1 - target) ** 2 + (q2 - target) ** 2) * w).sum() / wsum
-        self.opt_critic.zero_grad(set_to_none=True)
+        self.opt_critic.zero_grad(set_to_none=set_to_none)
         q_loss.backward()
         self.opt_critic.step()
 
         a_pi, logp = self.actor(o)
         q1p, q2p = self.critic(o, a_pi)
         pi_loss = ((alpha * logp - torch.min(q1p, q2p)) * w).sum() / wsum
-        self.opt_actor.zero_grad(set_to_none=True)
+        self.opt_actor.zero_grad(set_to_none=set_to_none)
         pi_loss.backward()
         self.opt_actor.step()
 
         alpha_loss = -(self.log_alpha * ((logp.detach() + self.target_entropy) * w)).sum() / wsum
-        self.opt_alpha.zero_grad(set_to_none=True)
+        self.opt_alpha.zero_grad(set_to_none=set_to_none)
         alpha_loss.backward()
         self.opt_alpha.step()
 

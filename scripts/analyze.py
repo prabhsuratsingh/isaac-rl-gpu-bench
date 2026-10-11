@@ -183,6 +183,32 @@ def summary_table(df: pd.DataFrame, thresholds: dict | None = None, random_ref: 
 
 SYSTEM_LEVELS = ["naive", "batched", "fused", "graph", "bf16"]
 
+# gate 4: the must-have matrix of the main benchmark (method -> versions that must be complete)
+MAIN_CELLS = {"ppo": ["reference", "reference+tuned"], "pets": ["naive+tuned", "fast+tuned"], "mbpo": ["naive+tuned", "fast+tuned"]}
+
+
+def gate_step4(df: pd.DataFrame, tasks=("cartpole", "ant"), seeds: int = 5) -> str | None:
+    """Every must-have cell (PPO / PETS / MBPO x 2 tasks; naive and fast for the model-based methods) has
+    `seeds` completed runs (status ok)."""
+    d = df[df.exp == "main_rtx4090"] if "exp" in df else df
+    if d.empty:
+        return None
+    lines = ["| task | method | version | completed | solved | final return |", "|---|---|---|---|---|---|"]
+    ok_all = True
+    for task in tasks:
+        for algo, versions in MAIN_CELLS.items():
+            for v in versions:
+                g = d[(d.task == task) & (d.algo == algo) & (d.impl == v)]
+                done = int((g.status == "ok").sum())
+                ok = done >= seeds
+                ok_all &= ok
+                m, lo, hi = bootstrap_ci(g.final_reward.tolist())
+                lines.append(f"| {task} | {algo} | {v} | {done}/{seeds}{'' if ok else ' MISSING'} | {int(g.solved.sum())}/{len(g)} | "
+                             f"{_fmt(m, lo, hi)} |")
+    lines.append(f"\n**Gate 4: {'MET' if ok_all else 'NOT MET'}**: the must-have matrix is "
+                 f"{'complete' if ok_all else 'incomplete'} on the primary GPU.")
+    return "\n".join(lines)
+
 
 def gate_step3(df: pd.DataFrame, task: str = "cartpole") -> str | None:
     """Step-3 gate: >= 3x planner throughput over naive with returns not degraded.
@@ -516,6 +542,10 @@ def main():
         gate = gate_markdown(s)
         (out_dir / "gate_step2.md").write_text(gate + "\n", encoding="utf-8")
         print(gate + "\n")
+    g4 = gate_step4(df) if not suffix and (df.exp == "main_rtx4090").any() else None
+    if g4:
+        (out_dir / "gate_step4.md").write_text(g4 + "\n", encoding="utf-8")
+        print(g4 + "\n")
     g3 = gate_step3(df) if not suffix else None
     if g3:
         (out_dir / "gate_step3.md").write_text(g3 + "\n", encoding="utf-8")

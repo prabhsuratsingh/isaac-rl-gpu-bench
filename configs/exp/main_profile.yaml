@@ -1,0 +1,158 @@
+# Nsight profile per (method, version, task) for the main-benchmark time breakdown (frozen code).
+name: main_profile
+timeout_min: 30
+jobs:
+- kind: profile
+  name: ppo_cartpole
+  matrix:
+    algo:
+    - ppo
+    task:
+    - cartpole
+    seed:
+    - 0
+  overrides:
+    run.exp: main_profile
+    profile.start: 20
+    profile.length: 30
+- kind: profile
+  name: pets_naive_cartpole
+  matrix:
+    algo:
+    - pets_naive
+    task:
+    - cartpole
+    seed:
+    - 0
+  overrides:
+    run.exp: main_profile
+    tuned: true
+    algo.impl: naive
+    algo.total_env_steps: 100000000
+    profile.start: 150
+    profile.length: 200
+- kind: profile
+  name: pets_fast_cartpole
+  matrix:
+    algo:
+    - pets_naive
+    task:
+    - cartpole
+    seed:
+    - 0
+  overrides:
+    run.exp: main_profile
+    tuned: true
+    algo.impl: fast
+    algo.total_env_steps: 100000000
+    profile.start: 150
+    profile.length: 200
+- kind: profile
+  name: mbpo_naive_cartpole
+  matrix:
+    algo:
+    - mbpo_naive
+    task:
+    - cartpole
+    seed:
+    - 0
+  overrides:
+    run.exp: main_profile
+    tuned: true
+    algo.impl: naive
+    algo.total_env_steps: 100000000
+    profile.start: 150
+    profile.length: 200
+- kind: profile
+  name: mbpo_fast_cartpole
+  matrix:
+    algo:
+    - mbpo_naive
+    task:
+    - cartpole
+    seed:
+    - 0
+  overrides:
+    run.exp: main_profile
+    tuned: true
+    algo.impl: fast
+    algo.total_env_steps: 100000000
+    profile.start: 150
+    profile.length: 200
+- kind: profile
+  name: ppo_ant
+  matrix:
+    algo:
+    - ppo
+    task:
+    - ant
+    seed:
+    - 0
+  overrides:
+    run.exp: main_profile
+    profile.start: 20
+    profile.length: 30
+- kind: profile
+  name: pets_naive_ant
+  matrix:
+    algo:
+    - pets_naive
+    task:
+    - ant
+    seed:
+    - 0
+  overrides:
+    run.exp: main_profile
+    tuned: true
+    algo.impl: naive
+    algo.total_env_steps: 100000000
+    profile.start: 350
+    profile.length: 200
+- kind: profile
+  name: pets_fast_ant
+  matrix:
+    algo:
+    - pets_naive
+    task:
+    - ant
+    seed:
+    - 0
+  overrides:
+    run.exp: main_profile
+    tuned: true
+    algo.impl: fast
+    algo.total_env_steps: 100000000
+    profile.start: 350
+    profile.length: 200
+- kind: profile
+  name: mbpo_naive_ant
+  matrix:
+    algo:
+    - mbpo_naive
+    task:
+    - ant
+    seed:
+    - 0
+  overrides:
+    run.exp: main_profile
+    tuned: true
+    algo.impl: naive
+    algo.total_env_steps: 100000000
+    profile.start: 350
+    profile.length: 200
+- kind: profile
+  name: mbpo_fast_ant
+  matrix:
+    algo:
+    - mbpo_naive
+    task:
+    - ant
+    seed:
+    - 0
+  overrides:
+    run.exp: main_profile
+    tuned: true
+    algo.impl: fast
+    algo.total_env_steps: 100000000
+    profile.start: 350
+    profile.length: 200

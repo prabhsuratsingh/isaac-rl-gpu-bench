@@ -444,10 +444,32 @@ def cmd_down(a):
     return 0
 
 
+FREEZE_TAG = "freeze-v1"
+
+
+def _check_freeze(exp_names: list[str]):
+    """Main-benchmark runs must use the frozen code: warn loudly if HEAD is not the freeze tag."""
+    if not any(n.startswith("main") for n in exp_names):
+        return
+    try:
+        tag = subprocess.run(["git", "rev-list", "-n", "1", FREEZE_TAG], cwd=I.ROOT, capture_output=True, text=True).stdout.strip()
+        head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=I.ROOT, capture_output=True, text=True).stdout.strip()
+    except OSError:
+        return
+    if not tag:
+        print(f"WARNING: main-benchmark run but no git tag {FREEZE_TAG!r} exists: freeze the code first "
+              f"(git tag {FREEZE_TAG} && git push origin {FREEZE_TAG})")
+    elif tag != head:
+        print(f"WARNING: HEAD {head[:10]} is not the frozen {FREEZE_TAG} ({tag[:10]}). After the freeze only bug fixes "
+              f"are allowed; make sure every commit since the tag is one, and note it in docs/protocol.md.")
+
+
 def cmd_exp(a):
     """One-shot: up -> run each exp file sequentially -> pull -> destroy (always, unless --keep)."""
+    names = []
     for f in a.exp:
-        expand(f)  # validate before paying for a GPU
+        names.append(expand(f)["exp"])  # validate before paying for a GPU
+    _check_freeze(names)
     inst_id = None
     created: list = []
     code = 1

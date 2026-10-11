@@ -42,6 +42,31 @@ class GpuReplayBuffer:
         self.size = min(self.size + n, self.capacity)
         return idx
 
+    def add_at(self, obs, act, next_obs, valid, term, rew):
+        """Graph-safe insert: the ring position lives in the device tensor `ptr_t` (the caller syncs it from
+        `self.ptr` before a replay and advances the host mirror with `advance(n)` afterwards)."""
+        n = obs.shape[0]
+        if not hasattr(self, "ptr_t"):
+            self.ptr_t = torch.zeros((), dtype=torch.long, device=self.device)
+        idx = (self.ptr_t + torch.arange(n, device=self.device)) % self.capacity
+        self.obs[idx] = obs
+        self.act[idx] = act
+        self.next_obs[idx] = next_obs
+        self.valid[idx] = valid.to(self.valid.dtype)
+        self.term[idx] = term.to(self.term.dtype)
+        self.rew[idx] = rew.to(self.rew.dtype)
+        self.ptr_t.copy_((self.ptr_t + n) % self.capacity)
+
+    def sync_ptr(self):
+        if not hasattr(self, "ptr_t"):
+            self.ptr_t = torch.zeros((), dtype=torch.long, device=self.device)
+        self.ptr_t.fill_(self.ptr)
+
+    def advance(self, n: int):
+        """Host-side mirror of `n` add_at transitions (deterministic, no read-back)."""
+        self.ptr = (self.ptr + n) % self.capacity
+        self.size = min(self.size + n, self.capacity)
+
     def sample_idx(self, shape) -> torch.Tensor:
         return torch.randint(0, self.size, shape, device=self.device)
 
