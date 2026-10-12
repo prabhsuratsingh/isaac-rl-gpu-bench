@@ -89,7 +89,7 @@ pip install -e ".[analysis]"
 python scripts/analyze.py results/rtx4090 --exps step1c_cartpole --paper step1c
 ```
 
-This writes tables and figures to `results/rtx4090/analysis/`. With `--paper <tag>` it also copies them into `docs/paper/generated/`, where the LaTeX research log [docs/paper/findings.tex](docs/paper/findings.tex) picks them up. That log is updated with every useful finding.
+This writes tables and figures to `results/rtx4090/analysis/`. With `--paper <tag>` it also copies them into `docs/paper/generated/`, where the LaTeX research log [docs/paper/findings.tex](docs/paper/findings.tex) picks them up. That log is updated with every useful finding
 
 ## Layout
 
