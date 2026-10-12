@@ -1,0 +1,8 @@
+# Completes main_ant: the session hit --max-hours during mbpo_fast_ant seed 2, so seeds 2-4 of that cell
+# never finished. Same frozen code, same overrides as main_ant.yaml, results go to the same main_rtx4090 exp.
+name: main_ant_rerun
+timeout_min: 35
+jobs:
+  - name: mbpo_fast_ant
+    matrix: {algo: [mbpo_naive], task: [ant], seed: [2, 3, 4]}
+    overrides: {run.exp: main_rtx4090, tuned: true, algo.impl: fast, algo.max_wall_s: 1200, algo.total_env_steps: 100000000}
