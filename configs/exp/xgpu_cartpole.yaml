@@ -1,0 +1,89 @@
+# Step-5 cross-GPU, Cartpole (run on a100 / h100; the RTX 4090 reference is main_rtx4090 seeds 0-2): PPO default,
+# PETS and MBPO naive + fast (tuned), seeds 0-2, stop at tau (cap 300 s), plus the planner microbenchmark.
+name: xgpu_cartpole
+timeout_min: 30
+jobs:
+- name: ppo_default_cartpole
+  matrix:
+    algo:
+    - ppo
+    task:
+    - cartpole
+    seed:
+    - 0
+    - 1
+    - 2
+  overrides:
+    run.exp: xgpu
+    run.stop_at_tau: true
+    algo.max_wall_s: 300
+- name: pets_naive_cartpole
+  matrix:
+    algo:
+    - pets_naive
+    task:
+    - cartpole
+    seed:
+    - 0
+    - 1
+    - 2
+  overrides:
+    tuned: true
+    run.stop_at_tau: true
+    run.exp: xgpu
+    algo.impl: naive
+    algo.max_wall_s: 300
+    algo.total_env_steps: 100000000
+- name: pets_fast_cartpole
+  matrix:
+    algo:
+    - pets_naive
+    task:
+    - cartpole
+    seed:
+    - 0
+    - 1
+    - 2
+  overrides:
+    tuned: true
+    run.stop_at_tau: true
+    run.exp: xgpu
+    algo.impl: fast
+    algo.max_wall_s: 300
+    algo.total_env_steps: 100000000
+- name: mbpo_naive_cartpole
+  matrix:
+    algo:
+    - mbpo_naive
+    task:
+    - cartpole
+    seed:
+    - 0
+    - 1
+    - 2
+  overrides:
+    tuned: true
+    run.stop_at_tau: true
+    run.exp: xgpu
+    algo.impl: naive
+    algo.max_wall_s: 300
+    algo.total_env_steps: 100000000
+- name: mbpo_fast_cartpole
+  matrix:
+    algo:
+    - mbpo_naive
+    task:
+    - cartpole
+    seed:
+    - 0
+    - 1
+    - 2
+  overrides:
+    tuned: true
+    run.stop_at_tau: true
+    run.exp: xgpu
+    algo.impl: fast
+    algo.max_wall_s: 300
+    algo.total_env_steps: 100000000
+- name: bench_planner
+  cmd: python scripts/bench_planner.py --out results/bench/planner.json

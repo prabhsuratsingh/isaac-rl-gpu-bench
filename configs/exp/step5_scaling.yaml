@@ -1,0 +1,254 @@
+# Step-5 scaling sweeps (k = 1; the N = 4096 / E = 5 / K x H = 200 x 36 points come from main_rtx4090):
+#   PPO env count N (default config), PETS-fast ensemble size E (must divide samples x particles = 200) and
+#   planner samples K x horizon H on Cartpole, and the planner microbenchmark rerun at the frozen code.
+# Every run stops once it holds tau.
+name: step5_scaling
+timeout_min: 30
+jobs:
+- name: ppo_n256_cartpole
+  matrix:
+    algo:
+    - ppo
+    task:
+    - cartpole
+    seed:
+    - 0
+    - 1
+    - 2
+  overrides:
+    algo.num_envs: 256
+    run.stop_at_tau: true
+    algo.max_wall_s: 300
+- name: ppo_n1024_cartpole
+  matrix:
+    algo:
+    - ppo
+    task:
+    - cartpole
+    seed:
+    - 0
+    - 1
+    - 2
+  overrides:
+    algo.num_envs: 1024
+    run.stop_at_tau: true
+    algo.max_wall_s: 300
+- name: ppo_n16384_cartpole
+  matrix:
+    algo:
+    - ppo
+    task:
+    - cartpole
+    seed:
+    - 0
+    - 1
+    - 2
+  overrides:
+    algo.num_envs: 16384
+    run.stop_at_tau: true
+    algo.max_wall_s: 300
+- name: ppo_n1024_ant
+  matrix:
+    algo:
+    - ppo
+    task:
+    - ant
+    seed:
+    - 0
+    - 1
+    - 2
+  overrides:
+    algo.num_envs: 1024
+    run.stop_at_tau: true
+    algo.max_wall_s: 1200
+- name: ppo_n16384_ant
+  matrix:
+    algo:
+    - ppo
+    task:
+    - ant
+    seed:
+    - 0
+    - 1
+    - 2
+  overrides:
+    algo.num_envs: 16384
+    run.stop_at_tau: true
+    algo.max_wall_s: 1200
+- name: pets_e1_cartpole
+  matrix:
+    algo:
+    - pets_naive
+    task:
+    - cartpole
+    seed:
+    - 0
+    - 1
+    - 2
+  overrides:
+    tuned: true
+    run.stop_at_tau: true
+    algo.impl: fast
+    algo.model.ensemble_size: 1
+    algo.max_wall_s: 300
+    algo.total_env_steps: 100000000
+- name: pets_e2_cartpole
+  matrix:
+    algo:
+    - pets_naive
+    task:
+    - cartpole
+    seed:
+    - 0
+    - 1
+    - 2
+  overrides:
+    tuned: true
+    run.stop_at_tau: true
+    algo.impl: fast
+    algo.model.ensemble_size: 2
+    algo.max_wall_s: 300
+    algo.total_env_steps: 100000000
+- name: pets_e4_cartpole
+  matrix:
+    algo:
+    - pets_naive
+    task:
+    - cartpole
+    seed:
+    - 0
+    - 1
+    - 2
+  overrides:
+    tuned: true
+    run.stop_at_tau: true
+    algo.impl: fast
+    algo.model.ensemble_size: 4
+    algo.max_wall_s: 300
+    algo.total_env_steps: 100000000
+- name: pets_e8_cartpole
+  matrix:
+    algo:
+    - pets_naive
+    task:
+    - cartpole
+    seed:
+    - 0
+    - 1
+    - 2
+  overrides:
+    tuned: true
+    run.stop_at_tau: true
+    algo.impl: fast
+    algo.model.ensemble_size: 8
+    algo.max_wall_s: 300
+    algo.total_env_steps: 100000000
+- name: pets_e10_cartpole
+  matrix:
+    algo:
+    - pets_naive
+    task:
+    - cartpole
+    seed:
+    - 0
+    - 1
+    - 2
+  overrides:
+    tuned: true
+    run.stop_at_tau: true
+    algo.impl: fast
+    algo.model.ensemble_size: 10
+    algo.max_wall_s: 300
+    algo.total_env_steps: 100000000
+- name: pets_k100h36_cartpole
+  matrix:
+    algo:
+    - pets_naive
+    task:
+    - cartpole
+    seed:
+    - 0
+    - 1
+    - 2
+  overrides:
+    tuned: true
+    run.stop_at_tau: true
+    algo.impl: fast
+    algo.mppi.samples: 100
+    algo.mppi.horizon: 36
+    algo.max_wall_s: 300
+    algo.total_env_steps: 100000000
+- name: pets_k400h36_cartpole
+  matrix:
+    algo:
+    - pets_naive
+    task:
+    - cartpole
+    seed:
+    - 0
+    - 1
+    - 2
+  overrides:
+    tuned: true
+    run.stop_at_tau: true
+    algo.impl: fast
+    algo.mppi.samples: 400
+    algo.mppi.horizon: 36
+    algo.max_wall_s: 300
+    algo.total_env_steps: 100000000
+- name: pets_k800h36_cartpole
+  matrix:
+    algo:
+    - pets_naive
+    task:
+    - cartpole
+    seed:
+    - 0
+    - 1
+    - 2
+  overrides:
+    tuned: true
+    run.stop_at_tau: true
+    algo.impl: fast
+    algo.mppi.samples: 800
+    algo.mppi.horizon: 36
+    algo.max_wall_s: 300
+    algo.total_env_steps: 100000000
+- name: pets_k200h12_cartpole
+  matrix:
+    algo:
+    - pets_naive
+    task:
+    - cartpole
+    seed:
+    - 0
+    - 1
+    - 2
+  overrides:
+    tuned: true
+    run.stop_at_tau: true
+    algo.impl: fast
+    algo.mppi.samples: 200
+    algo.mppi.horizon: 12
+    algo.max_wall_s: 300
+    algo.total_env_steps: 100000000
+- name: pets_k200h72_cartpole
+  matrix:
+    algo:
+    - pets_naive
+    task:
+    - cartpole
+    seed:
+    - 0
+    - 1
+    - 2
+  overrides:
+    tuned: true
+    run.stop_at_tau: true
+    algo.impl: fast
+    algo.mppi.samples: 200
+    algo.mppi.horizon: 72
+    algo.max_wall_s: 300
+    algo.total_env_steps: 100000000
+- name: bench_planner
+  cmd: python scripts/bench_planner.py --out results/bench/planner.json

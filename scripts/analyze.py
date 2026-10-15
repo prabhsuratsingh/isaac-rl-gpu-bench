@@ -56,9 +56,10 @@ def load_runs(gpu_dir: Path, exps: list[str] | None, exclude: list[str] | None =
             rows = [json.loads(l) for l in open(run_dir / "metrics.jsonl") if l.strip()]
             summ = json.loads((run_dir / "summary.json").read_text()) if (run_dir / "summary.json").exists() else {}
             meta = json.loads((run_dir / "run_meta.json").read_text()) if (run_dir / "run_meta.json").exists() else {}
+            cfg = json.loads((run_dir / "config.json").read_text()) if (run_dir / "config.json").exists() else {}
             if not rows:
                 continue
-            runs.append({"exp": exp_dir.name, "dir": run_dir, "rows": rows, "summary": summ, "meta": meta,
+            runs.append({"exp": exp_dir.name, "dir": run_dir, "rows": rows, "summary": summ, "meta": meta, "cfg": cfg,
                          "algo": rows[0]["algo"], "impl": rows[0]["impl"], "task": rows[0]["task"], "seed": rows[0]["seed"]})
     return runs
 
@@ -90,6 +91,23 @@ def _planner_rate(rows, num_envs: int | None) -> float | None:
         t = max((x.get("host_ms") or {}).get("plan", 0.0), (x.get("gpu_ms") or {}).get("plan", 0.0)) / 1e3
         vals.append(calls * num_envs / t if num_envs and calls and t > 0 else ps)
     return float(np.median(vals)) if vals else None
+
+
+def knobs(run: dict) -> dict:
+    """The experiment knobs swept in step 5, from the run's resolved config (+ summary for the env count)."""
+    cfg, summ = run.get("cfg") or {}, run.get("summary") or {}
+    algo, task = cfg.get("algo") or {}, cfg.get("task") or {}
+    model, mppi = algo.get("model") or {}, algo.get("mppi") or {}
+    impl = run.get("impl") or ""
+    return {
+        "level": impl.replace("+tuned", ""),
+        "num_envs": summ.get("num_envs") or algo.get("num_envs") or task.get("num_envs"),
+        "sim_substep_mult": task.get("sim_substep_mult", 1) or 1,
+        "physics_dt": summ.get("physics_dt"),
+        "ensemble_size": model.get("ensemble_size"),
+        "mppi_samples": mppi.get("samples"),
+        "mppi_horizon": mppi.get("horizon"),
+    }
 
 
 def final_reward(rows, k=5):
@@ -151,6 +169,7 @@ def run_table(runs, thresholds, gpu_dir: Path | None = None) -> pd.DataFrame:
             "cpu": host_cpu(r, gpu_dir) if gpu_dir else None,
             "git_sha": (r["meta"].get("sys", {}) or {}).get("git_sha"),
         }
+        rec.update(knobs(r))
         rec.update({f"share_{k}": v for k, v in phase_shares(rows).items()})
         out.append(rec)
     return pd.DataFrame(out)

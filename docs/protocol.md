@@ -139,6 +139,28 @@ bash scripts/profile.sh <name> algo=<a> task=<t> seed=0 profile.start=<i0> profi
 ## 9. Change log
 
 - v0.1: initial protocol (step 1).
+- v0.9 (2026-10-12), step 5 (pre-registered before any step-5 run):
+  - **Code:** step-5 runs use the freeze-v1 algorithm code. Every later commit only adds analysis/plotting scripts and experiment configs; there are no algorithm changes.
+  - **Simulator cost knob:** `task.sim_substep_mult = k` divides `sim.dt` by k and multiplies `decimation` by k. The control step (and so the task, the episode length and τ) is unchanged; each environment step does k× the physics substeps. Finer physics can shift returns slightly, so τ stays fixed from the k = 1 PPO reference and PPO's final return per k is reported as a check.
+  - **Crossover:**
+    - For each task and model-based method, k\* is the smallest k at which its median wall-clock to τ beats the best PPO (over N) at the same k.
+    - It is found by linear interpolation of log(t_PPO / t_MB) against log2 k between bracketing grid points; censored seeds count as +∞ in the median.
+    - **Ant thresholds:** no model-based method reaches τ on Ant, so Ant is scored at **0.3 τ and 0.5 τ**, fixed now.
+  - **Early stopping:** sweep runs stop once they hold τ (`run.stop_at_tau`, same rule as the analysis); the metric is wall-clock to τ.
+  - **Grids:**
+    - **Ablation:** PETS-Cartpole, levels naive → batched → fused → graph → bf16 → fast, 3 seeds.
+    - **Scaling:**
+      - PPO N ∈ {256, 1024, 4096, 16384} on Cartpole, {1024, 4096, 16384} on Ant;
+      - PETS-fast E ∈ {1, 2, 4, 5, 8, 10}. E must divide samples × particles = 200, so 3 and 7 are excluded;
+      - (K, H) ∈ {(100, 36), (200, 36), (400, 36), (800, 36), (200, 12), (200, 72)}.
+    - **Crossover:**
+      - Cartpole: k ∈ {1, 2, 4, 8, 16} × PPO N ∈ {1024, 4096, 16384} + PETS fast + MBPO fast;
+      - Ant: k ∈ {1, 2, 4, 8, 16} × PPO N = 4096 + MBPO fast.
+    - 3 seeds everywhere. The k = 1 points come from the main benchmark and the scaling sweep.
+  - **Cross-GPU:** A100 and H100, seeds 0–2.
+    - Cartpole: PPO default and PETS/MBPO naive and fast.
+    - Ant: PPO default and MBPO fast.
+    - Each GPU has its own host CPU (the CPU cannot be matched across GPU types). It is recorded and reported alongside the results.
 - v0.8 (2026-10-12), step 4:
   - MBPO `fast` = batched ensemble + CUDA-graphed model training + fast rollouts (TS-1 by random permutation, i.e. each member takes an equal random chunk of particles per step; same marginal member distribution, sampled without replacement) with the PETS Triton step and bf16 GEMMs, captured as CUDA graphs + CUDA-graphed SAC updates (capturable Adam, in-graph minibatch sampling).
   - PETS `fast` = the step-3 bf16 graphed planner + CUDA-graphed model training.

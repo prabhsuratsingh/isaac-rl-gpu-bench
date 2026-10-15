@@ -1,0 +1,102 @@
+# Step-5 ablation waterfall: PETS-Cartpole (the fastest model-based method), one optimisation at a time, at the
+# frozen code on one host. Tuned hyperparameters; each run stops once it holds tau (wall cap 300 s). The metric
+# is wall-clock to tau; fast = bf16 planner + CUDA-graphed model training.
+name: step5_ablation
+timeout_min: 10
+jobs:
+- name: pets_naive
+  matrix:
+    algo:
+    - pets_naive
+    task:
+    - cartpole
+    seed:
+    - 0
+    - 1
+    - 2
+  overrides:
+    tuned: true
+    run.stop_at_tau: true
+    algo.impl: naive
+    algo.max_wall_s: 300
+    algo.total_env_steps: 100000000
+- name: pets_batched
+  matrix:
+    algo:
+    - pets_naive
+    task:
+    - cartpole
+    seed:
+    - 0
+    - 1
+    - 2
+  overrides:
+    tuned: true
+    run.stop_at_tau: true
+    algo.impl: batched
+    algo.max_wall_s: 300
+    algo.total_env_steps: 100000000
+- name: pets_fused
+  matrix:
+    algo:
+    - pets_naive
+    task:
+    - cartpole
+    seed:
+    - 0
+    - 1
+    - 2
+  overrides:
+    tuned: true
+    run.stop_at_tau: true
+    algo.impl: fused
+    algo.max_wall_s: 300
+    algo.total_env_steps: 100000000
+- name: pets_graph
+  matrix:
+    algo:
+    - pets_naive
+    task:
+    - cartpole
+    seed:
+    - 0
+    - 1
+    - 2
+  overrides:
+    tuned: true
+    run.stop_at_tau: true
+    algo.impl: graph
+    algo.max_wall_s: 300
+    algo.total_env_steps: 100000000
+- name: pets_bf16
+  matrix:
+    algo:
+    - pets_naive
+    task:
+    - cartpole
+    seed:
+    - 0
+    - 1
+    - 2
+  overrides:
+    tuned: true
+    run.stop_at_tau: true
+    algo.impl: bf16
+    algo.max_wall_s: 300
+    algo.total_env_steps: 100000000
+- name: pets_fast
+  matrix:
+    algo:
+    - pets_naive
+    task:
+    - cartpole
+    seed:
+    - 0
+    - 1
+    - 2
+  overrides:
+    tuned: true
+    run.stop_at_tau: true
+    algo.impl: fast
+    algo.max_wall_s: 300
+    algo.total_env_steps: 100000000

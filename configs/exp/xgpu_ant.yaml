@@ -1,0 +1,36 @@
+# Step-5 cross-GPU, Ant: PPO default and MBPO fast, seeds 0-2, cap 1200 s (PETS-Ant is method-limited, F11/F14,
+# and the naive versions cost 1200 s each for no new information).
+name: xgpu_ant
+timeout_min: 30
+jobs:
+- name: ppo_default_ant
+  matrix:
+    algo:
+    - ppo
+    task:
+    - ant
+    seed:
+    - 0
+    - 1
+    - 2
+  overrides:
+    run.exp: xgpu
+    run.stop_at_tau: true
+    algo.max_wall_s: 1200
+- name: mbpo_fast_ant
+  matrix:
+    algo:
+    - mbpo_naive
+    task:
+    - ant
+    seed:
+    - 0
+    - 1
+    - 2
+  overrides:
+    tuned: true
+    run.stop_at_tau: true
+    run.exp: xgpu
+    algo.impl: fast
+    algo.max_wall_s: 1200
+    algo.total_env_steps: 100000000

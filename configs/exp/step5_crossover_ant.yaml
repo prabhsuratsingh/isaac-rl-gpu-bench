@@ -1,0 +1,129 @@
+# Step-5 crossover, Ant: k x {PPO N = 4096, MBPO fast}. Scored at 0.3 tau and 0.5 tau (pre-registered, protocol
+# v0.9) because no model-based method reaches tau in 1200 s; runs still stop at tau or the 1200 s cap.
+name: step5_crossover_ant
+timeout_min: 30
+jobs:
+- name: ppo_n4096_k2_ant
+  matrix:
+    algo:
+    - ppo
+    task:
+    - ant
+    seed:
+    - 0
+    - 1
+    - 2
+  overrides:
+    task.sim_substep_mult: 2
+    run.stop_at_tau: true
+    algo.max_wall_s: 1200
+- name: mbpo_fast_k2_ant
+  matrix:
+    algo:
+    - mbpo_naive
+    task:
+    - ant
+    seed:
+    - 0
+    - 1
+    - 2
+  overrides:
+    tuned: true
+    run.stop_at_tau: true
+    algo.impl: fast
+    task.sim_substep_mult: 2
+    algo.max_wall_s: 1200
+    algo.total_env_steps: 100000000
+- name: ppo_n4096_k4_ant
+  matrix:
+    algo:
+    - ppo
+    task:
+    - ant
+    seed:
+    - 0
+    - 1
+    - 2
+  overrides:
+    task.sim_substep_mult: 4
+    run.stop_at_tau: true
+    algo.max_wall_s: 1200
+- name: mbpo_fast_k4_ant
+  matrix:
+    algo:
+    - mbpo_naive
+    task:
+    - ant
+    seed:
+    - 0
+    - 1
+    - 2
+  overrides:
+    tuned: true
+    run.stop_at_tau: true
+    algo.impl: fast
+    task.sim_substep_mult: 4
+    algo.max_wall_s: 1200
+    algo.total_env_steps: 100000000
+- name: ppo_n4096_k8_ant
+  matrix:
+    algo:
+    - ppo
+    task:
+    - ant
+    seed:
+    - 0
+    - 1
+    - 2
+  overrides:
+    task.sim_substep_mult: 8
+    run.stop_at_tau: true
+    algo.max_wall_s: 1200
+- name: mbpo_fast_k8_ant
+  matrix:
+    algo:
+    - mbpo_naive
+    task:
+    - ant
+    seed:
+    - 0
+    - 1
+    - 2
+  overrides:
+    tuned: true
+    run.stop_at_tau: true
+    algo.impl: fast
+    task.sim_substep_mult: 8
+    algo.max_wall_s: 1200
+    algo.total_env_steps: 100000000
+- name: ppo_n4096_k16_ant
+  matrix:
+    algo:
+    - ppo
+    task:
+    - ant
+    seed:
+    - 0
+    - 1
+    - 2
+  overrides:
+    task.sim_substep_mult: 16
+    run.stop_at_tau: true
+    algo.max_wall_s: 1200
+- name: mbpo_fast_k16_ant
+  matrix:
+    algo:
+    - mbpo_naive
+    task:
+    - ant
+    seed:
+    - 0
+    - 1
+    - 2
+  overrides:
+    tuned: true
+    run.stop_at_tau: true
+    algo.impl: fast
+    task.sim_substep_mult: 16
+    algo.max_wall_s: 1200
+    algo.total_env_steps: 100000000

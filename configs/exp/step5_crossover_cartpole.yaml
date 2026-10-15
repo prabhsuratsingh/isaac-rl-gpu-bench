@@ -1,0 +1,322 @@
+# Step-5 crossover, Cartpole: physics substep multiplier k (sim.dt / k, decimation x k: same control step, k x the
+# physics work per env step) x PPO parallelism N, against PETS fast and MBPO fast (tuned). k = 1 comes from
+# main_rtx4090 (N = 4096) and step5_scaling (other N). Every run stops once it holds tau (cap 300 s).
+name: step5_crossover_cartpole
+timeout_min: 10
+jobs:
+- name: ppo_n1024_k2_cartpole
+  matrix:
+    algo:
+    - ppo
+    task:
+    - cartpole
+    seed:
+    - 0
+    - 1
+    - 2
+  overrides:
+    algo.num_envs: 1024
+    task.sim_substep_mult: 2
+    run.stop_at_tau: true
+    algo.max_wall_s: 300
+- name: ppo_n4096_k2_cartpole
+  matrix:
+    algo:
+    - ppo
+    task:
+    - cartpole
+    seed:
+    - 0
+    - 1
+    - 2
+  overrides:
+    algo.num_envs: 4096
+    task.sim_substep_mult: 2
+    run.stop_at_tau: true
+    algo.max_wall_s: 300
+- name: ppo_n16384_k2_cartpole
+  matrix:
+    algo:
+    - ppo
+    task:
+    - cartpole
+    seed:
+    - 0
+    - 1
+    - 2
+  overrides:
+    algo.num_envs: 16384
+    task.sim_substep_mult: 2
+    run.stop_at_tau: true
+    algo.max_wall_s: 300
+- name: pets_fast_k2_cartpole
+  matrix:
+    algo:
+    - pets_naive
+    task:
+    - cartpole
+    seed:
+    - 0
+    - 1
+    - 2
+  overrides:
+    tuned: true
+    run.stop_at_tau: true
+    algo.impl: fast
+    task.sim_substep_mult: 2
+    algo.max_wall_s: 300
+    algo.total_env_steps: 100000000
+- name: mbpo_fast_k2_cartpole
+  matrix:
+    algo:
+    - mbpo_naive
+    task:
+    - cartpole
+    seed:
+    - 0
+    - 1
+    - 2
+  overrides:
+    tuned: true
+    run.stop_at_tau: true
+    algo.impl: fast
+    task.sim_substep_mult: 2
+    algo.max_wall_s: 300
+    algo.total_env_steps: 100000000
+- name: ppo_n1024_k4_cartpole
+  matrix:
+    algo:
+    - ppo
+    task:
+    - cartpole
+    seed:
+    - 0
+    - 1
+    - 2
+  overrides:
+    algo.num_envs: 1024
+    task.sim_substep_mult: 4
+    run.stop_at_tau: true
+    algo.max_wall_s: 300
+- name: ppo_n4096_k4_cartpole
+  matrix:
+    algo:
+    - ppo
+    task:
+    - cartpole
+    seed:
+    - 0
+    - 1
+    - 2
+  overrides:
+    algo.num_envs: 4096
+    task.sim_substep_mult: 4
+    run.stop_at_tau: true
+    algo.max_wall_s: 300
+- name: ppo_n16384_k4_cartpole
+  matrix:
+    algo:
+    - ppo
+    task:
+    - cartpole
+    seed:
+    - 0
+    - 1
+    - 2
+  overrides:
+    algo.num_envs: 16384
+    task.sim_substep_mult: 4
+    run.stop_at_tau: true
+    algo.max_wall_s: 300
+- name: pets_fast_k4_cartpole
+  matrix:
+    algo:
+    - pets_naive
+    task:
+    - cartpole
+    seed:
+    - 0
+    - 1
+    - 2
+  overrides:
+    tuned: true
+    run.stop_at_tau: true
+    algo.impl: fast
+    task.sim_substep_mult: 4
+    algo.max_wall_s: 300
+    algo.total_env_steps: 100000000
+- name: mbpo_fast_k4_cartpole
+  matrix:
+    algo:
+    - mbpo_naive
+    task:
+    - cartpole
+    seed:
+    - 0
+    - 1
+    - 2
+  overrides:
+    tuned: true
+    run.stop_at_tau: true
+    algo.impl: fast
+    task.sim_substep_mult: 4
+    algo.max_wall_s: 300
+    algo.total_env_steps: 100000000
+- name: ppo_n1024_k8_cartpole
+  matrix:
+    algo:
+    - ppo
+    task:
+    - cartpole
+    seed:
+    - 0
+    - 1
+    - 2
+  overrides:
+    algo.num_envs: 1024
+    task.sim_substep_mult: 8
+    run.stop_at_tau: true
+    algo.max_wall_s: 300
+- name: ppo_n4096_k8_cartpole
+  matrix:
+    algo:
+    - ppo
+    task:
+    - cartpole
+    seed:
+    - 0
+    - 1
+    - 2
+  overrides:
+    algo.num_envs: 4096
+    task.sim_substep_mult: 8
+    run.stop_at_tau: true
+    algo.max_wall_s: 300
+- name: ppo_n16384_k8_cartpole
+  matrix:
+    algo:
+    - ppo
+    task:
+    - cartpole
+    seed:
+    - 0
+    - 1
+    - 2
+  overrides:
+    algo.num_envs: 16384
+    task.sim_substep_mult: 8
+    run.stop_at_tau: true
+    algo.max_wall_s: 300
+- name: pets_fast_k8_cartpole
+  matrix:
+    algo:
+    - pets_naive
+    task:
+    - cartpole
+    seed:
+    - 0
+    - 1
+    - 2
+  overrides:
+    tuned: true
+    run.stop_at_tau: true
+    algo.impl: fast
+    task.sim_substep_mult: 8
+    algo.max_wall_s: 300
+    algo.total_env_steps: 100000000
+- name: mbpo_fast_k8_cartpole
+  matrix:
+    algo:
+    - mbpo_naive
+    task:
+    - cartpole
+    seed:
+    - 0
+    - 1
+    - 2
+  overrides:
+    tuned: true
+    run.stop_at_tau: true
+    algo.impl: fast
+    task.sim_substep_mult: 8
+    algo.max_wall_s: 300
+    algo.total_env_steps: 100000000
+- name: ppo_n1024_k16_cartpole
+  matrix:
+    algo:
+    - ppo
+    task:
+    - cartpole
+    seed:
+    - 0
+    - 1
+    - 2
+  overrides:
+    algo.num_envs: 1024
+    task.sim_substep_mult: 16
+    run.stop_at_tau: true
+    algo.max_wall_s: 300
+- name: ppo_n4096_k16_cartpole
+  matrix:
+    algo:
+    - ppo
+    task:
+    - cartpole
+    seed:
+    - 0
+    - 1
+    - 2
+  overrides:
+    algo.num_envs: 4096
+    task.sim_substep_mult: 16
+    run.stop_at_tau: true
+    algo.max_wall_s: 300
+- name: ppo_n16384_k16_cartpole
+  matrix:
+    algo:
+    - ppo
+    task:
+    - cartpole
+    seed:
+    - 0
+    - 1
+    - 2
+  overrides:
+    algo.num_envs: 16384
+    task.sim_substep_mult: 16
+    run.stop_at_tau: true
+    algo.max_wall_s: 300
+- name: pets_fast_k16_cartpole
+  matrix:
+    algo:
+    - pets_naive
+    task:
+    - cartpole
+    seed:
+    - 0
+    - 1
+    - 2
+  overrides:
+    tuned: true
+    run.stop_at_tau: true
+    algo.impl: fast
+    task.sim_substep_mult: 16
+    algo.max_wall_s: 300
+    algo.total_env_steps: 100000000
+- name: mbpo_fast_k16_cartpole
+  matrix:
+    algo:
+    - mbpo_naive
+    task:
+    - cartpole
+    seed:
+    - 0
+    - 1
+    - 2
+  overrides:
+    tuned: true
+    run.stop_at_tau: true
+    algo.impl: fast
+    task.sim_substep_mult: 16
+    algo.max_wall_s: 300
+    algo.total_env_steps: 100000000
