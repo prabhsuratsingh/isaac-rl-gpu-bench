@@ -54,7 +54,10 @@ def make_ant(cfg) -> CostFn:
     act_cost_s, energy_s = float(cfg.actions_cost_scale), float(cfg.energy_cost_scale)
     alive_s, death_cost = float(cfg.alive_reward_scale), float(cfg.death_cost)
     term_h = float(cfg.termination_height)
-    decimation = float(cfg.decimation)
+    # progress per control step = v * control_dt / sim.dt = v * decimation. Under the sim-cost knob
+    # (sim.dt / k, decimation * k) the env reward is kept at the original scale (envs/isaac.py), so use the
+    # original decimation here too.
+    decimation = float(cfg.decimation) / int(getattr(cfg, "gpubench_substep_mult", 1) or 1)
     # motor_effort_ratio is all-ones in LocomotionEnv; dof_vel in obs is already * dof_vel_scale.
 
     def fn(obs, act, next_obs):

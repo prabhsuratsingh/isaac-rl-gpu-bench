@@ -52,6 +52,7 @@ def make_env_cfg(task: dict, device: str, seed: int, num_envs: int | None = None
         env_cfg.sim.dt = env_cfg.sim.dt / k
         env_cfg.decimation = env_cfg.decimation * k
         env_cfg.sim.render_interval = env_cfg.decimation
+    env_cfg.gpubench_substep_mult = k  # read by costs.py and _undo_dt_scaled_progress
     for key, val in (task.get("env_cfg_overrides") or {}).items():
         obj = env_cfg
         *path, last = key.split(".")
@@ -66,7 +67,30 @@ def make_env(task: dict, device: str, seed: int, num_envs: int | None = None):
 
     env_cfg = make_env_cfg(task, device, seed, num_envs)
     env = gym.make(task["gym_id"], cfg=env_cfg)
+    _undo_dt_scaled_progress(env, int(task.get("sim_substep_mult", 1)))
     return env, env_cfg
+
+
+def _undo_dt_scaled_progress(env, k: int):
+    """Keep the reward invariant under the sim-cost knob (bug fix, protocol v0.9.2).
+
+    Isaac Lab's LocomotionEnv (Ant) rewards progress = potential_t - potential_{t-1} with
+    potential = -dist_to_target / cfg.sim.dt, i.e. distance per *physics* step. Dividing sim.dt by k therefore
+    multiplies the progress term by k and changes the task. In DirectRLEnv.step, _get_dones (which updates
+    potentials / prev_potentials) runs before _get_rewards, and terminated envs get death_cost instead of the
+    sum, so the original reward is recovered exactly by removing (1 - 1/k) of the progress term on the
+    non-terminated envs. Cartpole's reward has no dt term and needs nothing."""
+    u = env.unwrapped
+    if k == 1 or not hasattr(u, "potentials"):
+        return
+    orig = u._get_rewards
+    keep = 1.0 - 1.0 / k
+
+    def _get_rewards():
+        r = orig()
+        return r - keep * (u.potentials - u.prev_potentials) * (~u.reset_terminated).to(r.dtype)
+
+    u._get_rewards = _get_rewards
 
 
 class GpuVecEnv:

@@ -44,9 +44,9 @@ def _tree(root: Path):
         # crossover: PPO slows ~k, MBPO barely (27 at k=1): crossing between k=2 and k=4
         for k in (2, 4, 8):
             for s in range(3):
-                _run(root, "rtx4090", f"step5_crossover_{task}", f"ppo_k{k}_{task}_s{s}", "ppo", "reference", task, s,
+                _run(root, "rtx4090", f"step5_crossover_{task}" + ("_fixed" if task == "ant" else ""), f"ppo_k{k}_{task}_s{s}", "ppo", "reference", task, s,
                      10 * k, k=k)
-                _run(root, "rtx4090", f"step5_crossover_{task}", f"mbpo_k{k}_{task}_s{s}", "mbpo", "fast+tuned", task,
+                _run(root, "rtx4090", f"step5_crossover_{task}" + ("_fixed" if task == "ant" else ""), f"mbpo_k{k}_{task}_s{s}", "mbpo", "fast+tuned", task,
                      s, 25 + k, k=k, n=32)
     for lv, t in zip(FG.LEVELS, (80, 40, 25, 15, 12, 9)):
         for s in range(3):

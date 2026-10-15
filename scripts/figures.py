@@ -37,7 +37,7 @@ GPU_COLOR = {"rtx4090": A.SERIES[6], "a100": A.SERIES[3], "h100": A.SERIES[4]}
 LEVELS = ["naive", "batched", "fused", "graph", "bf16", "fast"]
 LEVEL_LABEL = {"naive": "naive", "batched": "+ batched\nensemble", "fused": "+ fused\nTriton step",
                "graph": "+ CUDA\ngraphs", "bf16": "+ bf16", "fast": "+ graphed\nmodel training"}
-CROSS_EXPS = ["step5_crossover_cartpole", "step5_crossover_ant", "step5_scaling", "main_rtx4090"]
+CROSS_EXPS = ["step5_crossover_cartpole", "step5_crossover_ant_fixed", "step5_scaling", "main_rtx4090"]
 ANT_FRACS = (0.3, 0.5)  # pre-registered (protocol v0.9): fractions of tau for the Ant crossover
 HEADLINE = {"E": 5, "K": 200, "H": 36, "B": 32}  # bench_planner headline config (tuned PETS-Cartpole)
 METHODS = [("ppo", "reference", "PPO"), ("pets", "naive+tuned", "PETS naive"), ("pets", "fast+tuned", "PETS fast"),
@@ -356,7 +356,7 @@ def fig_crossover(F: Fig, results: Path, gpu="rtx4090"):
         ks_all = sorted({k for s in ser.values() for k in s})
         if len(ks_all) < 2:
             missing.append(f"{task}@{frac:g}τ")
-            placeholder(ax, f"{gpu}/step5_crossover_{task} (k = 1..16)")
+            placeholder(ax, f"{gpu}/step5_crossover_{task}{'_fixed' if task == 'ant' else ''}")
             ax.set_title(f"{task}, {frac:g}·τ" if frac != 1 else task, loc="left")
             continue
         ppo_labels = sorted([s for s in ser if s.startswith("PPO")], key=lambda s: int(s.split("=")[1]))

@@ -139,6 +139,15 @@ bash scripts/profile.sh <name> algo=<a> task=<t> seed=0 profile.start=<i0> profi
 ## 9. Change log
 
 - v0.1: initial protocol (step 1).
+- v0.9.2 (2026-10-15), bug fix:
+  - **Bug:** Isaac Lab's Ant reward computes progress as Δ(−distance to target / `cfg.sim.dt`). The substep knob divides `sim.dt` by k, so the progress term, and with it the task, was multiplied by k. Our Ant cost function scaled the same way through `decimation`.
+    - At k ≥ 4, PPO reached τ in about 4,500 vector steps instead of about 25,000.
+    - MBPO reached the full τ at every k ≥ 4, which it never does at k = 1.
+  - **Consequence:** the first Ant crossover run (`step5_crossover_ant`) is **invalid** and is kept on disk only as a record.
+  - **Fix:** `envs/isaac.py::_undo_dt_scaled_progress` removes (1 − 1/k) of the progress term on non-terminated envs. This is exact given Isaac Lab's step order: `_get_dones` updates the potentials, then `_get_rewards` runs, and terminated envs receive `death_cost`. `costs.py` uses decimation / k.
+  - **Verification:** CPU tests (`tests/test_substep_knob.py`) and on-GPU `check_costs --substep-mult {1,4,16}`, run at the start of `step5_crossover_ant_fixed`.
+  - **Unaffected:** Cartpole's reward has no dt term; its samples-to-τ is flat across k (F16), so the Cartpole crossover stands. k = 1 runs are unaffected.
+  - The v0.9.1 prediction (0.3 τ crossing near k ≈ 14; none at 0.5 τ) carries over unchanged to the rerun.
 - v0.9.1 (2026-10-15), before any Ant crossover run: the Ant grid is k in {1, 4, 8, 16, 32} (k = 2 replaced by 32).
   - **Why:** the Cartpole crossover showed that wall-clock to tau ~ (sequential vector steps to tau) x (sim ms per step + method overhead per step). The sim step costs the same at N = 32 and N = 4096 (latency-bound).
   - **Prediction from the k = 1 Ant runs:** PPO needs about 5,000 vector steps to 0.3 tau and MBPO fast about 3,600 (overheads about 4.5 and 42 ms per step beyond an 8 ms sim step), so the 0.3-tau crossing should land near k ~ 15. At 0.5 tau (about 8,700 against 10,000 steps), there should be no crossing.

@@ -2,6 +2,7 @@
 
     python scripts/check_costs.py --task cartpole     # expect max |err| < 1e-4  (exact port)
     python scripts/check_costs.py --task ant          # approximate port: reports error + correlation
+    python scripts/check_costs.py --task ant --substep-mult 4   # sim-cost knob: reward must keep its k=1 scale
 
 Only non-done transitions are compared (for done envs Isaac Lab returns the post-reset observation).
 Writes results/checks/costs_<task>.json. Exit code 1 if an exact task exceeds tolerance.
@@ -26,6 +27,7 @@ def main():
     p.add_argument("--num-envs", type=int, default=256)
     p.add_argument("--steps", type=int, default=400)
     p.add_argument("--device", default="cuda:0")
+    p.add_argument("--substep-mult", type=int, default=1, help="task.sim_substep_mult (crossover knob)")
     args = p.parse_args()
 
     from gpubench.envs.isaac import launch_app
@@ -38,6 +40,7 @@ def main():
     from gpubench.envs.isaac import make_env
 
     task = yaml.safe_load((ROOT / "configs" / "task" / f"{args.task}.yaml").read_text())
+    task["sim_substep_mult"] = args.substep_mult
     env, env_cfg = make_env(task, args.device, seed=0, num_envs=args.num_envs)
     cost = make_cost(task["cost"], env_cfg)
     u = env.unwrapped
@@ -56,14 +59,16 @@ def main():
         obs = nobs
     e, re, rh = torch.cat(errs), torch.cat(r_env_all), torch.cat(r_hat_all)
     corr = torch.corrcoef(torch.stack([re, rh]))[0, 1].item()
-    res = {"task": args.task, "n": int(e.numel()), "max_abs_err": e.max().item(), "mean_abs_err": e.mean().item(),
+    res = {"task": args.task, "substep_mult": args.substep_mult, "reward_mean": re.mean().item(),
+           "reward_hat_mean": rh.mean().item(), "n": int(e.numel()), "max_abs_err": e.max().item(), "mean_abs_err": e.mean().item(),
            "reward_std": re.std().item(), "corr": corr, "termination_agreement": torch.cat(term_agree).mean().item()}
     tol = EXACT_TOL.get(args.task)
     res["pass"] = (res["max_abs_err"] < tol) if tol is not None else (corr > 0.9)
     print(json.dumps(res, indent=2))
     out = ROOT / "results" / "checks"
     out.mkdir(parents=True, exist_ok=True)
-    (out / f"costs_{args.task}.json").write_text(json.dumps(res, indent=2))
+    suffix = f"_k{args.substep_mult}" if args.substep_mult != 1 else ""
+    (out / f"costs_{args.task}{suffix}.json").write_text(json.dumps(res, indent=2))
     from gpubench.envs.isaac import shutdown
 
     shutdown(app, 0 if res["pass"] else 1, env)  # does not return
