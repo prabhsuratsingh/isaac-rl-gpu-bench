@@ -139,6 +139,11 @@ bash scripts/profile.sh <name> algo=<a> task=<t> seed=0 profile.start=<i0> profi
 ## 9. Change log
 
 - v0.1: initial protocol (step 1).
+- v0.9.1 (2026-10-15), before any Ant crossover run: the Ant grid is k in {1, 4, 8, 16, 32} (k = 2 replaced by 32).
+  - **Why:** the Cartpole crossover showed that wall-clock to tau ~ (sequential vector steps to tau) x (sim ms per step + method overhead per step). The sim step costs the same at N = 32 and N = 4096 (latency-bound).
+  - **Prediction from the k = 1 Ant runs:** PPO needs about 5,000 vector steps to 0.3 tau and MBPO fast about 3,600 (overheads about 4.5 and 42 ms per step beyond an 8 ms sim step), so the 0.3-tau crossing should land near k ~ 15. At 0.5 tau (about 8,700 against 10,000 steps), there should be no crossing.
+  - **Change:** k = 32 brackets that crossing; k = 2 carries little information.
+  - Recorded as a prediction before the runs.
 - v0.9 (2026-10-12), step 5 (pre-registered before any step-5 run):
   - **Code:** step-5 runs use the freeze-v1 algorithm code. Every later commit only adds analysis/plotting scripts and experiment configs; there are no algorithm changes.
   - **Simulator cost knob:** `task.sim_substep_mult = k` divides `sim.dt` by k and multiplies `decimation` by k. The control step (and so the task, the episode length and τ) is unchanged; each environment step does k× the physics substeps. Finer physics can shift returns slightly, so τ stays fixed from the k = 1 PPO reference and PPO's final return per k is reported as a check.
