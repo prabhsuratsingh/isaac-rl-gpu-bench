@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import figures as FG  # noqa: E402
 
 
-def _run(root: Path, gpu, exp, run_id, algo, impl, task, seed, t_tau, *, k=1, n=4096, E=5, K=200, H=36, dph=0.5):
+def _run(root: Path, gpu, exp, run_id, algo, impl, task, seed, t_tau, *, k=1, n=4096, E=5, K=200, H=36, dph=0.5, sim=None):
     """A run whose return ramps linearly and crosses `t_tau` seconds in (never, if t_tau is None)."""
     d = root / gpu / exp / run_id
     d.mkdir(parents=True)
@@ -25,7 +25,7 @@ def _run(root: Path, gpu, exp, run_id, algo, impl, task, seed, t_tau, *, k=1, n=
         w = end * i / 40
         r = tau * 1.05 * w / t_tau if t_tau else tau * 0.2
         rows.append({"algo": algo, "impl": impl, "task": task, "seed": seed, "wall_s": w, "env_steps": i * 1000,
-                     "reward_mean": min(r, tau * 1.1), "host_ms": {"sim": 5.0 * k}, "calls": {"sim": 1}})
+                     "reward_mean": min(r, tau * 1.1), "host_ms": {"sim": sim or 5.0 * k}, "calls": {"sim": 1}})
     (d / "metrics.jsonl").write_text("\n".join(json.dumps(x) for x in rows))
     (d / "summary.json").write_text(json.dumps({"status": "ok", "num_envs": n}))
     (d / "run_meta.json").write_text(json.dumps({"sys": {"vast": {"dph": dph}, "cpu": {"model": "Fake CPU"}}}))
@@ -59,6 +59,8 @@ def _tree(root: Path):
         for K, H in ((100, 36), (200, 12)):
             _run(root, "rtx4090", "step5_scaling", f"pets_k{K}h{H}_s{s}", "pets", "fast+tuned", "cartpole", s, 9,
                  K=K, H=H, n=32)
+    for s in range(2):  # Anymal: a naturally 4x more expensive sim step -> Ant-equivalent k = 4
+        _run(root, "rtx4090", "step1_ppo", f"ppo_anymal_s{s}", "ppo", "reference", "anymal", s, 10, sim=20.0)
     for g in ("a100", "h100"):
         for task in ("cartpole", "ant"):
             for s in range(3):
@@ -92,6 +94,7 @@ def test_all_figures_render_and_gate_met_with_full_data(tmp_path, monkeypatch):
         assert (tmp_path / "figs" / f"{name}.png").stat().st_size > 10_000
         assert (tmp_path / "figs" / f"{name}.pdf").exists()
     assert "Gate 5: MET" in status, status
+    assert "Anymal-C (20.0 ms sim step): 4.00" in status, status
     assert "cartpole@1τ/MBPO fast: 2." in status or "cartpole@1τ/MBPO fast: 3." in status, status
 
 
@@ -102,6 +105,12 @@ def test_missing_data_gives_placeholders_not_crashes(tmp_path, monkeypatch):
         assert (tmp_path / "figs" / f"{name}.png").exists()
     assert "Gate 5: NOT MET" in status
     assert "partial" in status
+
+
+def test_k_equivalent():
+    assert FG.k_equivalent([1, 2, 4, 8], [5, 10, 20, 40], 20) == pytest.approx(4.0)
+    assert FG.k_equivalent([1, 4, 16], [8, 22, 75], 8 * 4 ** 0.5) == pytest.approx(2 ** (np.log(4) / np.log(22 / 8)), rel=1e-6)
+    assert FG.k_equivalent([1, 2], [5, 10], 50) is None
 
 
 def test_crossover_interpolation():

@@ -139,6 +139,9 @@ bash scripts/profile.sh <name> algo=<a> task=<t> seed=0 profile.start=<i0> profi
 ## 9. Change log
 
 - v0.1: initial protocol (step 1).
+- v0.9.3 (2026-10-17), scope: MBPO/PETS on Anymal-C are out of scope.
+  - **Why:** the reward needs unobserved torques, accelerations, air time and contacts. A port means either a lossy cost (a different task) or a learned reward head (new algorithm code after the freeze), at about 6–10 GPU-h. Anymal's 20.2 ms natural sim step is Ant-equivalent k ≈ 3.6, far below k\* ≈ 18.
+  - **Kept:** Anymal is used only as a measured sim-cost reference on the crossover axis (PPO step-1 runs, same host timer).
 - v0.9.2 (2026-10-15), bug fix:
   - **Bug:** Isaac Lab's Ant reward computes progress as Δ(−distance to target / `cfg.sim.dt`). The substep knob divides `sim.dt` by k, so the progress term, and with it the task, was multiplied by k. Our Ant cost function scaled the same way through `decimation`.
     - At k ≥ 4, PPO reached τ in about 4,500 vector steps instead of about 25,000.

@@ -323,6 +323,27 @@ def _sim_ms(runs) -> float | None:
     return h / c if c else None
 
 
+def natural_sim_ms(results: Path, gpu="rtx4090", task="anymal") -> float | None:
+    """Sim ms per env step of a task's own simulator (PPO default, N=4096, k=1; step-1 runs). Same host-timer
+    measure as the crossover top axis, so it can be placed on the k axis as a natural sim-cost reference."""
+    rs = [r for r in load(results, gpu, ["step1_ppo"]) if r["task"] == task and r["algo"] == "ppo"
+          and A.knobs(r)["num_envs"] == 4096 and A.knobs(r)["sim_substep_mult"] == 1]
+    v = [m for m in (_sim_ms([r]) for r in rs) if m]
+    return float(np.median(v)) if v else None
+
+
+def k_equivalent(ks, sim_ms, target: float) -> float | None:
+    """k at which the measured sim cost curve reaches `target` ms (log-log interpolation; None outside range)."""
+    pts = sorted((k, m) for k, m in zip(ks, sim_ms) if m)
+    for (k0, m0), (k1, m1) in zip(pts, pts[1:]):
+        if m0 <= target <= m1:
+            if m1 == m0:
+                return float(k0)
+            x = np.log(k0) + (np.log(k1) - np.log(k0)) * (np.log(target) - np.log(m0)) / (np.log(m1) - np.log(m0))
+            return float(np.exp(x))
+    return None
+
+
 def crossover_series(runs, task: str, tau: float) -> dict:
     """{label: {k: [times]}} for PPO (default config) at each N and for the fast model-based methods
     (tuned config only: ensemble/planner sweeps from step5_scaling are excluded)."""
@@ -347,6 +368,7 @@ def fig_crossover(F: Fig, results: Path, gpu="rtx4090"):
 
     runs = load(results, gpu, CROSS_EXPS)
     th = thresholds()
+    anymal_ms = natural_sim_ms(results, gpu)
     panels = [("cartpole", 1.0)] + [("ant", f) for f in ANT_FRACS]
     fig, axes = plt.subplots(1, len(panels), figsize=(5.2 * len(panels), 4.4), constrained_layout=True)
     missing, kstar = [], {}
@@ -407,6 +429,14 @@ def fig_crossover(F: Fig, results: Path, gpu="rtx4090"):
             top = ax.secondary_xaxis("top")
             top.set_xticks(ks_all, [f"{sim[k]:.1f}" if sim[k] else "" for k in ks_all], fontsize=8)
             top.set_xlabel("sim step, ms (PPO, N=4096)", fontsize=8, color=A.INK2)
+            if task == "ant" and anymal_ms:  # a real simulator that is naturally this expensive
+                ke = k_equivalent(ks_all, [sim[k] for k in ks_all], anymal_ms)
+                if ke:
+                    kstar[f"ant-equivalent k of Anymal-C ({anymal_ms:.1f} ms sim step)"] = ke
+                    ax.axvline(ke, color=A.INK2, linestyle=(0, (1, 2)), linewidth=1.2)
+                    ax.annotate(f"Anymal-C\n(natural sim,\n{anymal_ms:.0f} ms)", (ke, 0.02),
+                                xycoords=("data", "axes fraction"), xytext=(3, 2), textcoords="offset points",
+                                fontsize=7, color=A.INK2, va="bottom")
         ax.legend(fontsize=8, loc="lower right")
     fig.suptitle("Crossover: when does a learned model beat parallel simulation on wall-clock?", x=0.01, ha="left",
                  fontweight="bold")
@@ -465,7 +495,7 @@ def fig_xgpu(F: Fig, results: Path):
                 m, lo, hi = med_ci(t)
                 x = mi + gi * width
                 if not np.isfinite(m):  # most seeds never reached the threshold
-                    ax.annotate("not\nreached", (x, 0.02), xycoords=("data", "axes fraction"), ha="center",
+                    ax.annotate("not\nreached", (x, 0.02 + 0.09 * gi), xycoords=("data", "axes fraction"), ha="center",
                                 va="bottom", fontsize=7, color=GPU_COLOR[g])
                     continue
                 got = True
@@ -495,7 +525,7 @@ def fig_xgpu(F: Fig, results: Path):
                 w = time_to(r, tau)
                 if dph and np.isfinite(w):
                     usd.append(w / 3600 * dph)
-            if usd:
+            if usd and len(usd) > len(rs) / 2:  # same rule as the time panels: most seeds must solve
                 got = True
                 ax.bar(mi + gi * width, float(np.median(usd)), width, color=GPU_COLOR[g])
     if got:
