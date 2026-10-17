@@ -23,21 +23,55 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-# Camera presets on env_cfg.viewer: Cartpole from the front over a few envs, legged robots followed.
+# Camera presets on env_cfg.viewer. Cartpole's rail runs along y, so it is filmed side-on from +x.
+# "grid": several envs in view, Isaac's own follow camera. "centered": one robot, re-aimed every step.
 VIEWS = {
-    "cartpole": dict(origin_type="env", env_index=0, eye=(0.0, 9.0, 3.0), lookat=(0.0, 0.0, 1.5)),
+    "cartpole": dict(origin_type="env", env_index=0, eye=(7.0, 0.0, 2.6), lookat=(0.0, 0.0, 2.0)),
     "ant": dict(origin_type="asset_root", asset_name="robot", env_index=0, eye=(4.0, 4.0, 2.5), lookat=(0.0, 0.0, 0.5)),
     "anymal": dict(origin_type="asset_root", asset_name="robot", env_index=0, eye=(3.0, 3.0, 2.0), lookat=(0.0, 0.0, 0.4)),
 }
+# centered view of the legged robots: camera offset from env 0's root (side-on to Ant's +x heading), aim height
+FOLLOW = {"ant": ((0.5, -4.0, 1.6), 0.3), "anymal": ((0.5, -3.5, 1.4), 0.2)}
+CENTERED_SPACING = 15.0  # m between envs, so other robots stay out of a centered shot
 
 
-def _camera(task_name: str):
+def _camera(task_name: str, view: str):
     def hook(env_cfg):
         v = env_cfg.viewer
         v.resolution = (1280, 720)
         for k, val in VIEWS.get(task_name, {}).items():
             setattr(v, k, val)
+        if view == "centered":
+            env_cfg.scene.env_spacing = CENTERED_SPACING
+            if task_name in FOLLOW:
+                v.origin_type = "world"  # FollowCam aims the camera instead of Isaac's controller
     return hook
+
+
+def _follow_cam(env, task_name: str):
+    """Re-aim the viewport at env 0's robot after every reset/step, so it stays in the centre of the frame."""
+    import gymnasium as gym
+
+    offset, dz = FOLLOW[task_name]
+
+    class FollowCam(gym.Wrapper):
+        def _aim(self):
+            u = self.env.unwrapped
+            p = u.scene["robot"].data.root_pos_w[0].tolist()
+            u.sim.set_camera_view(eye=[p[0] + offset[0], p[1] + offset[1], p[2] + offset[2]],
+                                  target=[p[0], p[1], p[2] + dz])
+
+        def reset(self, **kw):
+            out = self.env.reset(**kw)
+            self._aim()
+            return out
+
+        def step(self, action):
+            out = self.env.step(action)
+            self._aim()
+            return out
+
+    return FollowCam(env)
 
 
 def main():
@@ -46,7 +80,10 @@ def main():
     p.add_argument("--random", action="store_true", help="random actions (rendering smoke test)")
     p.add_argument("--task", help="with --random: task name (configs/task/<task>.yaml)")
     p.add_argument("--steps", type=int, default=600, help="control steps to record")
-    p.add_argument("--num-envs", type=int, help="default: 16 (PPO/random/MBPO), the training count for PETS")
+    p.add_argument("--num-envs", type=int,
+                   help="default: the training count for PETS (its graphs are shaped for it); else 16 (grid) / 1 (centered)")
+    p.add_argument("--view", choices=("grid", "centered"), default="grid")
+    p.add_argument("--warmup", type=int, default=5, help="steps run before recording starts (the renderer's first frame is black)")
     p.add_argument("--out", type=Path, default=ROOT / "results" / "recordings")
     p.add_argument("--device", default="cuda:0")
     a = p.parse_args()
@@ -75,15 +112,19 @@ def main():
     from gpubench.envs.isaac import GpuVecEnv, make_env, shutdown
 
     seed_everything(int(cfg.get("seed", 0)))
-    n = a.num_envs or (int(cfg["algo"]["num_envs"]) if algo == "pets" else 16)
+    n = a.num_envs or (int(cfg["algo"]["num_envs"]) if algo == "pets" else (1 if a.view == "centered" else 16))
     env, env_cfg = make_env(task, a.device, int(cfg.get("seed", 0)), num_envs=n, render_mode="rgb_array",
-                            cfg_hook=_camera(task["name"]))
+                            cfg_hook=_camera(task["name"], a.view))
+    if a.view == "centered" and task["name"] in FOLLOW:
+        env = _follow_cam(env, task["name"])
     tmp = a.out / f"_tmp_{run_id}"
-    env = gym.wrappers.RecordVideo(env, video_folder=str(tmp), step_trigger=lambda s: s == 0, video_length=a.steps,
-                                   disable_logger=True)
+    env = gym.wrappers.RecordVideo(env, video_folder=str(tmp), step_trigger=lambda s: s == a.warmup,
+                                   video_length=a.steps, disable_logger=True)
+    total = a.warmup + a.steps
 
     code, info = 0, {"run_id": run_id, "algo": algo, "task": task["name"], "seed": cfg.get("seed"), "num_envs": n,
-                     "steps": a.steps, "note": "policy retrained for the video with the benchmark config (videos.yaml)"}
+                     "view": a.view, "steps": a.steps,
+                     "note": "policy retrained for the video with the benchmark config (videos*.yaml)"}
     try:
         returns = []
         if algo == "ppo":
@@ -101,7 +142,7 @@ def main():
             info["checkpoint"] = ckpts[-1].name
             obs = venv.get_observations()
             ret = torch.zeros(venv.num_envs, device=a.device)
-            for _ in range(a.steps):
+            for _ in range(total):
                 with torch.inference_mode():
                     obs, rew, dones, _ = venv.step(policy(obs))
                 ret += rew
@@ -113,7 +154,7 @@ def main():
             act_fn = _model_based_policy(algo, cfg, run_dir, venv, env_cfg, a.device)
             obs = venv.reset()
             ret = torch.zeros(venv.num_envs, device=a.device)
-            for _ in range(a.steps):
+            for _ in range(total):
                 act, after = act_fn(obs)
                 obs, rew, term, trunc, _ = venv.step(act)
                 done = term | trunc
@@ -121,8 +162,9 @@ def main():
                 ret += rew
                 returns += ret[done].tolist()
                 ret[done] = 0
-        info["episodes"] = len(returns)
+        info["episodes"] = len(returns)  # episodes that ended during warmup + recording (falls or time-outs)
         info["return_mean"] = sum(returns) / len(returns) if returns else None
+        info["return_running_mean"] = ret.mean().item()  # episode-so-far return of the envs still running
     except Exception:
         import traceback
 

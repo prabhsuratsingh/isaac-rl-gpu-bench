@@ -1,0 +1,32 @@
+# Second batch of videos, robot in the centre of the frame (the first batch, videos.yaml, is kept as is).
+# Same best seeds and configs as videos.yaml, retrained (policies are not pulled back from instances).
+#   Cartpole: side-on camera (the rail runs along y), one cartpole (PETS keeps its 32 envs, spread 15 m apart).
+#   Ant / Anymal: one robot, camera re-aimed at it every step; 1000 steps so episodes reach their time limit.
+# Videos: results/<gpu>/recordings_centered/<run_id>.mp4 (+ .json with episode returns).
+name: videos_centered
+timeout_min: 30
+jobs:
+  - name: render_smoke_centered
+    cmd: python scripts/record.py --random --task ant --view centered --steps 30 --out results/recordings_centered/_smoke
+  - name: ppo_cartpole
+    matrix: {algo: [ppo], task: [cartpole], seed: [1]}
+  - name: ppo_ant
+    matrix: {algo: [ppo], task: [ant], seed: [2]}
+  - name: ppo_anymal
+    matrix: {algo: [ppo], task: [anymal], seed: [1]}
+  - name: pets_fast_cartpole
+    matrix: {algo: [pets_naive], task: [cartpole], seed: [0]}
+    overrides: {tuned: true, algo.impl: fast, algo.max_wall_s: 120, algo.total_env_steps: 100000000, run.save_policy: true}
+  - name: mbpo_fast_ant
+    matrix: {algo: [mbpo_naive], task: [ant], seed: [4]}
+    overrides: {tuned: true, algo.impl: fast, algo.max_wall_s: 1200, algo.total_env_steps: 100000000, run.save_policy: true}
+  - name: rec_ppo_cartpole
+    cmd: python scripts/record.py results/videos_centered/ppo_cartpole --view centered --steps 600 --out results/recordings_centered
+  - name: rec_ppo_ant
+    cmd: python scripts/record.py results/videos_centered/ppo_ant --view centered --steps 1000 --out results/recordings_centered
+  - name: rec_ppo_anymal
+    cmd: python scripts/record.py results/videos_centered/ppo_anymal --view centered --steps 1000 --out results/recordings_centered
+  - name: rec_pets_fast_cartpole
+    cmd: python scripts/record.py results/videos_centered/pets_fast_cartpole --view centered --steps 600 --out results/recordings_centered
+  - name: rec_mbpo_fast_ant
+    cmd: python scripts/record.py results/videos_centered/mbpo_fast_ant --view centered --steps 1000 --out results/recordings_centered
