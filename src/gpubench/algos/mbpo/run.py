@@ -175,5 +175,7 @@ def run(cfg: dict, logger, venv, env_cfg, timer):
             if stop:
                 break
 
+    if cfg["run"].get("save_policy"):  # tooling for scripts/record.py; after the loop, so timing is unaffected
+        torch.save({"sac": sac.state_dict()}, logger.dir / "policy.pt")
     return {"env_steps": (it + 1) * B, "iterations": it + 1, "num_envs": B, "updates_per_iter": updates_per_iter,
             **rep.summary()}

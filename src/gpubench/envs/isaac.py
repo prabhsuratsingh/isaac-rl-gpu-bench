@@ -62,11 +62,16 @@ def make_env_cfg(task: dict, device: str, seed: int, num_envs: int | None = None
     return env_cfg
 
 
-def make_env(task: dict, device: str, seed: int, num_envs: int | None = None):
+def make_env(task: dict, device: str, seed: int, num_envs: int | None = None, render_mode: str | None = None,
+             cfg_hook=None):
+    """`render_mode="rgb_array"` (+ an app launched with enable_cameras) is for scripts/record.py only;
+    `cfg_hook(env_cfg)` edits the cfg before the env is built (e.g. the recording camera)."""
     import gymnasium as gym
 
     env_cfg = make_env_cfg(task, device, seed, num_envs)
-    env = gym.make(task["gym_id"], cfg=env_cfg)
+    if cfg_hook is not None:
+        cfg_hook(env_cfg)
+    env = gym.make(task["gym_id"], cfg=env_cfg, render_mode=render_mode)
     _undo_dt_scaled_progress(env, int(task.get("sim_substep_mult", 1)))
     return env, env_cfg
 

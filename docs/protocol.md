@@ -139,6 +139,10 @@ bash scripts/profile.sh <name> algo=<a> task=<t> seed=0 profile.start=<i0> profi
 ## 9. Change log
 
 - v0.1: initial protocol (step 1).
+- v0.9.4 (2026-10-17), tooling only:
+  - **`run.save_policy`** (default off) saves the PETS ensemble / MBPO SAC state after the training loop. PPO's final rsl_rl checkpoint already exists.
+  - **`scripts/record.py`** records a saved policy in a *separate* process with cameras on (rendering would distort timings).
+  - **`configs/exp/videos.yaml`** retrains the best seed of each method and records it. Videos are illustrations, not results.
 - v0.9.3 (2026-10-17), scope: MBPO/PETS on Anymal-C are out of scope.
   - **Why:** the reward needs unobserved torques, accelerations, air time and contacts. A port means either a lossy cost (a different task) or a learned reward head (new algorithm code after the freeze), at about 6–10 GPU-h. Anymal's 20.2 ms natural sim step is Ant-equivalent k ≈ 3.6, far below k\* ≈ 18.
   - **Kept:** Anymal is used only as a measured sim-cost reference on the crossover axis (PPO step-1 runs, same host timer).

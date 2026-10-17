@@ -1,0 +1,31 @@
+# Videos of the best run of each method (seed with the highest final return in the benchmark results).
+# Policies are retrained with run.save_policy=true (tooling only, written after the loop) and recorded by
+# scripts/record.py in a separate process with cameras on, so no benchmark timing is affected.
+# Needs RT cores (RTX 4090). Videos: results/<gpu>/recordings/<run_id>.mp4 (+ .json with episode returns).
+name: videos
+timeout_min: 30
+jobs:
+  - name: render_smoke
+    cmd: python scripts/record.py --random --task cartpole --steps 60
+  - name: ppo_cartpole
+    matrix: {algo: [ppo], task: [cartpole], seed: [1]}
+  - name: ppo_ant
+    matrix: {algo: [ppo], task: [ant], seed: [2]}
+  - name: ppo_anymal
+    matrix: {algo: [ppo], task: [anymal], seed: [1]}
+  - name: pets_fast_cartpole
+    matrix: {algo: [pets_naive], task: [cartpole], seed: [0]}
+    overrides: {tuned: true, algo.impl: fast, algo.max_wall_s: 120, algo.total_env_steps: 100000000, run.save_policy: true}
+  - name: mbpo_fast_ant
+    matrix: {algo: [mbpo_naive], task: [ant], seed: [4]}
+    overrides: {tuned: true, algo.impl: fast, algo.max_wall_s: 1200, algo.total_env_steps: 100000000, run.save_policy: true}
+  - name: rec_ppo_cartpole
+    cmd: python scripts/record.py results/videos/ppo_cartpole
+  - name: rec_ppo_ant
+    cmd: python scripts/record.py results/videos/ppo_ant
+  - name: rec_ppo_anymal
+    cmd: python scripts/record.py results/videos/ppo_anymal
+  - name: rec_pets_fast_cartpole
+    cmd: python scripts/record.py results/videos/pets_fast_cartpole
+  - name: rec_mbpo_fast_ant
+    cmd: python scripts/record.py results/videos/mbpo_fast_ant
