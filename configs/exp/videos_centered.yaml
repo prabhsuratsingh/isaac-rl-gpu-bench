@@ -2,12 +2,16 @@
 # Same best seeds and configs as videos.yaml, retrained (policies are not pulled back from instances).
 #   Cartpole: side-on camera (the rail runs along y), one cartpole (PETS keeps its 32 envs, spread 15 m apart).
 #   Ant / Anymal: one robot, camera re-aimed at it every step; 1000 steps so episodes reach their time limit.
+# Same session also records a swarm view (64 robots, PETS 32, wide shot following the group):
+#   results/<gpu>/recordings_swarm/<run_id>.mp4.
 # Videos: results/<gpu>/recordings_centered/<run_id>.mp4 (+ .json with episode returns).
 name: videos_centered
 timeout_min: 30
 jobs:
   - name: render_smoke_centered
     cmd: python scripts/record.py --random --task ant --view centered --steps 30 --out results/recordings_centered/_smoke
+  - name: render_smoke_swarm
+    cmd: python scripts/record.py --random --task ant --view swarm --steps 30 --out results/recordings_swarm/_smoke
   - name: ppo_cartpole
     matrix: {algo: [ppo], task: [cartpole], seed: [1]}
   - name: ppo_ant
@@ -30,3 +34,13 @@ jobs:
     cmd: python scripts/record.py results/videos_centered/pets_fast_cartpole --view centered --steps 600 --out results/recordings_centered
   - name: rec_mbpo_fast_ant
     cmd: python scripts/record.py results/videos_centered/mbpo_fast_ant --view centered --steps 1000 --out results/recordings_centered
+  - name: swarm_ppo_cartpole
+    cmd: python scripts/record.py results/videos_centered/ppo_cartpole --view swarm --steps 600 --out results/recordings_swarm
+  - name: swarm_ppo_ant
+    cmd: python scripts/record.py results/videos_centered/ppo_ant --view swarm --steps 1000 --out results/recordings_swarm
+  - name: swarm_ppo_anymal
+    cmd: python scripts/record.py results/videos_centered/ppo_anymal --view swarm --steps 1000 --out results/recordings_swarm
+  - name: swarm_pets_fast_cartpole
+    cmd: python scripts/record.py results/videos_centered/pets_fast_cartpole --view swarm --steps 600 --out results/recordings_swarm
+  - name: swarm_mbpo_fast_ant
+    cmd: python scripts/record.py results/videos_centered/mbpo_fast_ant --view swarm --steps 1000 --out results/recordings_swarm

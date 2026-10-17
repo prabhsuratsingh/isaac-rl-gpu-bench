@@ -35,6 +35,9 @@ FOLLOW = {"ant": ((0.5, -4.0, 1.6), 0.3), "anymal": ((0.5, -3.5, 1.4), 0.2)}
 CENTERED_SPACING = 15.0  # m between envs, so other robots stay out of a centered shot
 
 
+SWARM_ENVS = 64  # default robots in a swarm shot (PETS keeps its training count)
+
+
 def _camera(task_name: str, view: str):
     def hook(env_cfg):
         v = env_cfg.viewer
@@ -44,22 +47,36 @@ def _camera(task_name: str, view: str):
         if view == "centered":
             env_cfg.scene.env_spacing = CENTERED_SPACING
             if task_name in FOLLOW:
-                v.origin_type = "world"  # FollowCam aims the camera instead of Isaac's controller
+                v.origin_type = "world"  # AimCam aims the camera instead of Isaac's controller
+        if view == "swarm":
+            v.origin_type = "world"
     return hook
 
 
-def _follow_cam(env, task_name: str):
-    """Re-aim the viewport at env 0's robot after every reset/step, so it stays in the centre of the frame."""
+def _aim_cam(env, task_name: str, view: str):
+    """Re-aim the viewport after every reset/step.
+    centered: at env 0's robot, from the side. swarm: at the centre of all robots (legged robots walk away
+    from their start, so the shot follows the group), from high up, at a distance scaled to the grid size."""
+    import math
+
     import gymnasium as gym
 
-    offset, dz = FOLLOW[task_name]
-
-    class FollowCam(gym.Wrapper):
+    class AimCam(gym.Wrapper):
         def _aim(self):
             u = self.env.unwrapped
-            p = u.scene["robot"].data.root_pos_w[0].tolist()
-            u.sim.set_camera_view(eye=[p[0] + offset[0], p[1] + offset[1], p[2] + offset[2]],
-                                  target=[p[0], p[1], p[2] + dz])
+            if view == "centered":
+                offset, dz = FOLLOW[task_name]
+                c = u.scene["robot"].data.root_pos_w[0].tolist()
+            else:
+                w = math.ceil(math.sqrt(u.num_envs)) * float(u.cfg.scene.env_spacing)  # grid width, m
+                if task_name in FOLLOW:
+                    c = u.scene["robot"].data.root_pos_w.mean(0).tolist()
+                    offset, dz = (0.25 * w, -0.9 * w, 0.5 * w), 0.0
+                else:  # cartpole: static grid; the rails run along y, so look from +x
+                    c = u.scene.env_origins.mean(0).tolist()
+                    offset, dz = (0.85 * w, 0.3 * w, 0.4 * w), 1.5
+            u.sim.set_camera_view(eye=[c[0] + offset[0], c[1] + offset[1], c[2] + offset[2]],
+                                  target=[c[0], c[1], c[2] + dz])
 
         def reset(self, **kw):
             out = self.env.reset(**kw)
@@ -71,7 +88,7 @@ def _follow_cam(env, task_name: str):
             self._aim()
             return out
 
-    return FollowCam(env)
+    return AimCam(env)
 
 
 def main():
@@ -81,8 +98,8 @@ def main():
     p.add_argument("--task", help="with --random: task name (configs/task/<task>.yaml)")
     p.add_argument("--steps", type=int, default=600, help="control steps to record")
     p.add_argument("--num-envs", type=int,
-                   help="default: the training count for PETS (its graphs are shaped for it); else 16 (grid) / 1 (centered)")
-    p.add_argument("--view", choices=("grid", "centered"), default="grid")
+                   help="default: the training count for PETS (its graphs are shaped for it); else 16 (grid) / 1 (centered) / 64 (swarm)")
+    p.add_argument("--view", choices=("grid", "centered", "swarm"), default="grid")
     p.add_argument("--warmup", type=int, default=5, help="steps run before recording starts (the renderer's first frame is black)")
     p.add_argument("--out", type=Path, default=ROOT / "results" / "recordings")
     p.add_argument("--device", default="cuda:0")
@@ -112,11 +129,11 @@ def main():
     from gpubench.envs.isaac import GpuVecEnv, make_env, shutdown
 
     seed_everything(int(cfg.get("seed", 0)))
-    n = a.num_envs or (int(cfg["algo"]["num_envs"]) if algo == "pets" else (1 if a.view == "centered" else 16))
+    n = a.num_envs or (int(cfg["algo"]["num_envs"]) if algo == "pets" else {"centered": 1, "swarm": SWARM_ENVS}.get(a.view, 16))
     env, env_cfg = make_env(task, a.device, int(cfg.get("seed", 0)), num_envs=n, render_mode="rgb_array",
                             cfg_hook=_camera(task["name"], a.view))
-    if a.view == "centered" and task["name"] in FOLLOW:
-        env = _follow_cam(env, task["name"])
+    if a.view == "swarm" or (a.view == "centered" and task["name"] in FOLLOW):
+        env = _aim_cam(env, task["name"], a.view)
     tmp = a.out / f"_tmp_{run_id}"
     env = gym.wrappers.RecordVideo(env, video_folder=str(tmp), step_trigger=lambda s: s == a.warmup,
                                    video_length=a.steps, disable_logger=True)
